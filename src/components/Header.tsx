@@ -140,11 +140,6 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <RefreshCw className="w-4 h-4" />
             <span>Inventory</span>
-            {totalAlerts > 0 && (
-              <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
-                {totalAlerts}
-              </span>
-            )}
           </button>
 
           <button
