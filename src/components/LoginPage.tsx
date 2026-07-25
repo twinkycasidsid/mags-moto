@@ -1,23 +1,23 @@
 import React, { useState } from 'react';
-import { User, StoreSettings } from '../types';
+import { StoreSettings } from '../types';
 import { Wrench, Lock, User as UserIcon, LogIn, AlertCircle } from 'lucide-react';
 
 interface LoginPageProps {
   settings: StoreSettings;
-  users: User[];
-  onLoginSuccess: (user: User) => void;
+  onLogin: (username: string, password: string) => Promise<void>;
+  isSubmitting?: boolean;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
   settings,
-  users,
-  onLoginSuccess,
+  onLogin,
+  isSubmitting = false,
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -32,28 +32,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       return;
     }
 
-    // Match user by username
-    const foundUser = users.find(
-      (u) => u.username.trim().toLowerCase() === cleanUsername
-    );
-
-    if (!foundUser) {
-      setError('Invalid username or password.');
-      return;
+    try {
+      await onLogin(cleanUsername, password);
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Invalid username or password.');
     }
-
-    if (!foundUser.active) {
-      setError('This user account is deactivated.');
-      return;
-    }
-
-    // Verify PIN / Password
-    if (foundUser.pin && foundUser.pin !== password) {
-      setError('Invalid username or password.');
-      return;
-    }
-
-    onLoginSuccess(foundUser);
   };
 
   return (
@@ -123,10 +106,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
           <button
             type="submit"
+            disabled={isSubmitting}
             className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
           >
             <LogIn className="w-4 h-4" />
-            <span>Log In</span>
+            <span>{isSubmitting ? 'Signing In...' : 'Log In'}</span>
           </button>
         </form>
       </div>

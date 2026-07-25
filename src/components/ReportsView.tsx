@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction, Expense, Product, StoreSettings, User, Category } from '../types';
+import { PaginationControls } from './PaginationControls';
 import {
   BarChart3,
   TrendingUp,
@@ -32,8 +33,6 @@ import {
   Boxes,
   Eye,
   X,
-  ChevronLeft,
-  ChevronRight,
   Award,
   Activity
 } from 'lucide-react';
@@ -95,7 +94,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   // Search & Pagination
   const [inventorySearch, setInventorySearch] = useState<string>('');
   const [inventoryPage, setInventoryPage] = useState<number>(1);
-  const itemsPerPage = 8;
+  const [salesPage, setSalesPage] = useState<number>(1);
+  const [expensesPage, setExpensesPage] = useState<number>(1);
+  const itemsPerPage = 10;
 
   // Selected date modal for transaction drilldown
   const [selectedDrilldownDate, setSelectedDrilldownDate] = useState<string | null>(null);
@@ -139,14 +140,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   // Helper date extractors
   const getDateFromTimestamp = (ts: string) => {
     if (!ts) return '';
-    return ts.split(' ')[0]; // Assumes 'YYYY-MM-DD HH:MM AM/PM'
+    return ts.split('T')[0];
   };
 
   // 1. FILTERED DATA
   const completedTransactions = useMemo(() => {
     return transactions.filter((t) => {
       if (t.status !== 'completed') return false;
-      const tDate = getDateFromTimestamp(t.timestamp);
+      const tDate = getDateFromTimestamp(t.occurredAt);
       return tDate >= appliedFrom && tDate <= appliedTo;
     });
   }, [transactions, appliedFrom, appliedTo]);
@@ -257,7 +258,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     });
 
     completedTransactions.forEach((t) => {
-      const tDate = getDateFromTimestamp(t.timestamp);
+        const tDate = getDateFromTimestamp(t.occurredAt);
       t.items.forEach((item) => {
         if (!salesMap[item.productId]) {
           salesMap[item.productId] = {
@@ -347,7 +348,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     } = {};
 
     completedTransactions.forEach((t) => {
-      const d = getDateFromTimestamp(t.timestamp);
+      const d = getDateFromTimestamp(t.occurredAt);
       if (!daysMap[d]) {
         daysMap[d] = {
           date: d,
@@ -412,7 +413,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
     const prevTx = transactions.filter((t) => {
       if (t.status !== 'completed') return false;
-      const tDate = getDateFromTimestamp(t.timestamp);
+      const tDate = getDateFromTimestamp(t.occurredAt);
       return tDate >= prevFromStr && tDate <= prevToStr;
     });
 
@@ -555,8 +556,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   // Transaction Drilldown Modal List
   const drilldownTransactions = useMemo(() => {
     if (!selectedDrilldownDate) return [];
-    return completedTransactions.filter((t) => getDateFromTimestamp(t.timestamp) === selectedDrilldownDate);
+    return completedTransactions.filter((t) => getDateFromTimestamp(t.occurredAt) === selectedDrilldownDate);
   }, [completedTransactions, selectedDrilldownDate]);
+
+  const totalSalesPages = Math.max(1, Math.ceil(periodSalesTable.length / itemsPerPage));
+  const paginatedSalesTable = useMemo(() => {
+    const start = (salesPage - 1) * itemsPerPage;
+    return periodSalesTable.slice(start, start + itemsPerPage);
+  }, [periodSalesTable, salesPage]);
+
+  const totalExpensesPages = Math.max(1, Math.ceil(filteredExpenses.length / itemsPerPage));
+  const paginatedExpenses = useMemo(() => {
+    const start = (expensesPage - 1) * itemsPerPage;
+    return filteredExpenses.slice(start, start + itemsPerPage);
+  }, [expensesPage, filteredExpenses]);
 
   // Export CSV Function
   const exportToCSV = () => {
@@ -911,7 +924,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <p className="text-xs text-slate-500">Click any date row to view transactions for that day.</p>
               </div>
               <div className="text-xs text-slate-400 font-semibold">
-                Showing {periodSalesTable.length} recorded dates
+                Showing {paginatedSalesTable.length} of {periodSalesTable.length} recorded dates
               </div>
             </div>
 
@@ -929,14 +942,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                  {periodSalesTable.length === 0 ? (
+                  {paginatedSalesTable.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-8 text-slate-400 font-bold">
                         No sales recorded in the selected date range.
                       </td>
                     </tr>
                   ) : (
-                    periodSalesTable.map((row) => (
+                    paginatedSalesTable.map((row) => (
                       <tr
                         key={row.date}
                         onClick={() => setSelectedDrilldownDate(row.date)}
@@ -968,6 +981,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </tbody>
               </table>
             </div>
+            <PaginationControls
+              currentPage={salesPage}
+              totalItems={periodSalesTable.length}
+              pageSize={itemsPerPage}
+              onPageChange={setSalesPage}
+            />
           </div>
         </div>
       )}
@@ -1122,29 +1141,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
 
             {/* Pagination Controls */}
-            {totalInventoryPages > 1 && (
-              <div className="flex items-center justify-between pt-4 border-t border-slate-100 text-xs">
-                <span className="text-slate-500 font-semibold">
-                  Page {inventoryPage} of {totalInventoryPages} ({filteredInventoryList.length} total items)
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={inventoryPage === 1}
-                    onClick={() => setInventoryPage((p) => p - 1)}
-                    className="p-2 border border-slate-200 rounded-xl disabled:opacity-40 hover:bg-slate-100 cursor-pointer"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <button
-                    disabled={inventoryPage === totalInventoryPages}
-                    onClick={() => setInventoryPage((p) => p + 1)}
-                    className="p-2 border border-slate-200 rounded-xl disabled:opacity-40 hover:bg-slate-100 cursor-pointer"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
+            <PaginationControls
+              currentPage={inventoryPage}
+              totalItems={filteredInventoryList.length}
+              pageSize={itemsPerPage}
+              onPageChange={setInventoryPage}
+            />
           </div>
         </div>
       )}
@@ -1222,14 +1224,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                  {filteredExpenses.length === 0 ? (
+                  {paginatedExpenses.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="text-center py-8 text-slate-400 font-bold">
                         No expenses recorded in selected date range.
                       </td>
                     </tr>
                   ) : (
-                    filteredExpenses.map((exp) => (
+                    paginatedExpenses.map((exp) => (
                       <tr key={exp.id} className="hover:bg-slate-50">
                         <td className="p-3 font-bold text-slate-900">{exp.date}</td>
                         <td className="p-3 font-semibold text-slate-700">{exp.category}</td>
@@ -1244,6 +1246,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 </tbody>
               </table>
             </div>
+            <PaginationControls
+              currentPage={expensesPage}
+              totalItems={filteredExpenses.length}
+              pageSize={itemsPerPage}
+              onPageChange={setExpensesPage}
+            />
           </div>
         </div>
       )}

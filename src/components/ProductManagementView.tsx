@@ -1,6 +1,18 @@
-import React, { useState } from 'react';
-import { Product, Category, Supplier, StoreSettings, User } from '../types';
-import { Search, Plus, Edit2, Archive, RotateCcw, Package, Download, X } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Category, Product, StoreSettings, Supplier, User } from '../types';
+import { PaginationControls } from './PaginationControls';
+import {
+  Archive,
+  Download,
+  Edit2,
+  Eye,
+  Package,
+  Plus,
+  RotateCcw,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
 
 interface ProductManagementViewProps {
   products: Product[];
@@ -8,11 +20,14 @@ interface ProductManagementViewProps {
   suppliers: Supplier[];
   settings: StoreSettings;
   currentUser: User;
-  onSaveProduct: (product: Product) => void;
-  onToggleArchiveProduct: (productId: string) => void;
+  onSaveProduct: (product: Product, totalPurchaseCost?: number) => Promise<void> | void;
+  onToggleArchiveProduct: (productId: string) => Promise<void> | void;
+  onDeleteProduct: (productId: string) => Promise<void> | void;
   isAddModalOpen: boolean;
   setIsAddModalOpen: (open: boolean) => void;
 }
+
+const calculateLowStockLevel = (stock: number) => Math.max(1, Math.ceil(Math.max(0, stock) * 0.3));
 
 export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   products,
@@ -22,6 +37,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   currentUser,
   onSaveProduct,
   onToggleArchiveProduct,
+  onDeleteProduct,
   isAddModalOpen,
   setIsAddModalOpen,
 }) => {
@@ -29,101 +45,186 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<'active' | 'archived' | 'all'>('active');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPurchaseCost, setTotalPurchaseCost] = useState<number>(0);
+  const [initialStockQuantity, setInitialStockQuantity] = useState<number>(1);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const activeCategories = categories.filter((category) => category.active !== false);
+  const defaultSupplierId = suppliers[0]?.id ?? '';
 
-  // Form state
   const [formData, setFormData] = useState<Partial<Product>>({
     name: '',
     sku: '',
-    barcode: '',
-    categoryId: categories[0]?.id || '',
-    supplierId: suppliers[0]?.id || '',
+    categoryId: activeCategories[0]?.id || categories[0]?.id || '',
+    supplierId: defaultSupplierId,
     unit: 'pc',
     costPrice: 0,
     sellingPrice: 0,
     currentStock: 0,
-    reorderLevel: 5,
+    reorderLevel: calculateLowStockLevel(1),
     status: 'active',
   });
 
+  const lowStockLevel = useMemo(
+    () => calculateLowStockLevel(editingProduct ? editingProduct.currentStock : initialStockQuantity),
+    [editingProduct, initialStockQuantity],
+  );
+  const calculatedUnitCost = useMemo(() => {
+    if (editingProduct) {
+      return Number(formData.costPrice) || 0;
+    }
+
+    if (totalPurchaseCost <= 0 || initialStockQuantity <= 0) {
+      return 0;
+    }
+
+    return Number((totalPurchaseCost / initialStockQuantity).toFixed(2));
+  }, [editingProduct, formData.costPrice, initialStockQuantity, totalPurchaseCost]);
+
   const openAdd = () => {
+    if (!defaultSupplierId) {
+      alert('No supplier record is available. Add a supplier first before creating products.');
+      return;
+    }
+
+    setFormError(null);
+    setFieldErrors({});
     setEditingProduct(null);
+    setTotalPurchaseCost(0);
+    setInitialStockQuantity(1);
     setFormData({
       name: '',
-      sku: `SKU-${Date.now().toString().slice(-6)}`,
-      barcode: `480${Math.floor(1000001 + Math.random() * 8999999)}`,
-      categoryId: categories[0]?.id || '',
-      supplierId: suppliers[0]?.id || '',
+      sku: '',
+      categoryId: activeCategories[0]?.id || categories[0]?.id || '',
+      supplierId: defaultSupplierId,
       unit: 'pc',
-      costPrice: 100,
-      sellingPrice: 150,
-      currentStock: 10,
-      reorderLevel: 5,
+      costPrice: 0,
+      sellingPrice: 0,
+      currentStock: 0,
+      reorderLevel: calculateLowStockLevel(1),
       status: 'active',
     });
     setIsAddModalOpen(true);
   };
 
   const openEdit = (product: Product) => {
+    setFormError(null);
+    setFieldErrors({});
     setEditingProduct(product);
+    setTotalPurchaseCost(0);
+    setInitialStockQuantity(product.currentStock);
     setFormData(product);
     setIsAddModalOpen(true);
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.categoryId) {
-      alert('Product name and category are required.');
+    const nextErrors: Record<string, string> = {};
+    setFormError(null);
+
+    if (!formData.name?.trim()) {
+      nextErrors.name = 'Product name is required.';
+    }
+
+    if (!formData.categoryId) {
+      nextErrors.categoryId = 'Category is required.';
+    }
+
+    if (!formData.unit?.trim()) {
+      nextErrors.unit = 'Unit of measurement is required.';
+    }
+
+    if ((Number(formData.sellingPrice) || 0) < 0) {
+      nextErrors.sellingPrice = 'Selling price cannot be negative.';
+    }
+
+    if (!editingProduct) {
+      if (totalPurchaseCost <= 0) {
+        nextErrors.totalPurchaseCost = 'Total purchase cost must be greater than zero.';
+      }
+
+      if (initialStockQuantity <= 0) {
+        nextErrors.initialStockQuantity = 'Initial stock quantity must be greater than zero.';
+      }
+    }
+
+    if (!defaultSupplierId && !editingProduct?.supplierId && !formData.supplierId) {
+      nextErrors.supplier = 'No supplier is available. Add a supplier first before saving a product.';
+    }
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setFormError('Please correct the highlighted fields.');
       return;
     }
 
     const productToSave: Product = {
       id: editingProduct ? editingProduct.id : `prod-${Date.now()}`,
-      sku: formData.sku || `SKU-${Date.now().toString().slice(-5)}`,
-      barcode: formData.barcode || '',
+      sku: editingProduct?.sku || formData.sku || '',
       name: formData.name,
       description: formData.description || '',
       categoryId: formData.categoryId!,
-      supplierId: formData.supplierId || suppliers[0]?.id || '',
+      supplierId: editingProduct?.supplierId || formData.supplierId || defaultSupplierId,
       unit: formData.unit || 'pc',
-      costPrice: Number(formData.costPrice) || 0,
+      costPrice: editingProduct ? Number(formData.costPrice) || 0 : calculatedUnitCost,
       sellingPrice: Number(formData.sellingPrice) || 0,
-      currentStock: Number(formData.currentStock) || 0,
-      reorderLevel: Number(formData.reorderLevel) || 5,
+      currentStock: editingProduct ? editingProduct.currentStock : initialStockQuantity,
+      reorderLevel: editingProduct ? editingProduct.reorderLevel : lowStockLevel,
       status: formData.status || 'active',
       createdAt: editingProduct ? editingProduct.createdAt : new Date().toISOString().split('T')[0],
       updatedAt: new Date().toISOString().split('T')[0],
     };
 
-    onSaveProduct(productToSave);
-    setIsAddModalOpen(false);
+    try {
+      await onSaveProduct(productToSave, editingProduct ? undefined : totalPurchaseCost);
+      setFormError(null);
+      setFieldErrors({});
+      setIsAddModalOpen(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Unable to save product.');
+    }
   };
 
-  // Filter products
-  const filteredProducts = products.filter((p) => {
+  const filteredProducts = products.filter((product) => {
     const matchesSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase()) ||
-      p.barcode.includes(search);
-    const matchesCategory = selectedCategory === 'all' || p.categoryId === selectedCategory;
-    const matchesStatus = selectedStatus === 'all' || p.status === selectedStatus;
+      product.name.toLowerCase().includes(search.toLowerCase()) ||
+      product.sku.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || product.categoryId === selectedCategory;
+    const matchesStatus = selectedStatus === 'all' || product.status === selectedStatus;
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * 10;
+    return filteredProducts.slice(start, start + 10);
+  }, [currentPage, filteredProducts]);
+
   const handleExportCSV = () => {
-    const headers = ['SKU', 'Barcode', 'Name', 'Category', 'Cost Price', 'Selling Price', 'Stock', 'Unit', 'Status'];
-    const rows = filteredProducts.map((p) => [
-      p.sku,
-      p.barcode,
-      `"${p.name.replace(/"/g, '""')}"`,
-      categories.find((c) => c.id === p.categoryId)?.name || 'Uncategorized',
-      p.costPrice,
-      p.sellingPrice,
-      p.currentStock,
-      p.unit,
-      p.status,
+    const headers = [
+      'SKU',
+      'Product Name',
+      'Category',
+      'Unit',
+      'Unit Cost',
+      'Selling Price',
+      'Low Stock Alert Level',
+      'Status',
+    ];
+    const rows = filteredProducts.map((product) => [
+      product.sku,
+      `"${product.name.replace(/"/g, '""')}"`,
+      categories.find((category) => category.id === product.categoryId)?.name || 'Uncategorized',
+      product.unit,
+      product.costPrice,
+      product.sellingPrice,
+      product.reorderLevel,
+      product.status,
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const csvContent =
+      'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((entry) => entry.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
@@ -133,74 +234,74 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
     document.body.removeChild(link);
   };
 
+  const openView = (product: Product) => {
+    setViewingProduct(product);
+  };
+
   return (
     <div className="space-y-6">
-      {/* Header Bar */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
-            <Package className="w-6 h-6 text-blue-600" />
+          <h2 className="flex items-center gap-2 text-xl font-extrabold text-slate-900">
+            <Package className="h-6 w-6 text-blue-600" />
             <span>Products Catalog</span>
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage Mags Moto products, selling prices, cost records, and inventory reorder levels.
+          <p className="mt-0.5 text-xs text-slate-500">
+            Maintain product information, selling prices, unit costs, and product status.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <button
             onClick={handleExportCSV}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors"
+            className="flex items-center space-x-1.5 rounded-xl bg-slate-100 px-3.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-200"
           >
-            <Download className="w-4 h-4" />
+            <Download className="h-4 w-4" />
             <span>Export CSV</span>
           </button>
 
           {currentUser.role === 'admin' && (
             <button
               onClick={openAdd}
-              className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md transition-all"
+              className="flex items-center space-x-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-md transition-all hover:bg-blue-500"
             >
-              <Plus className="w-4 h-4 stroke-[3]" />
-              <span>Add New Part / Item</span>
+              <Plus className="h-4 w-4 stroke-[3]" />
+              <span>Add Product</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Filter Toolbar */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+      <div className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm sm:flex-row sm:items-center">
         <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Search by part name, SKU, or barcode..."
+            placeholder="Search by product name or SKU..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Category Filter */}
           <select
             value={selectedCategory}
             onChange={(e) => setSelectedCategory(e.target.value)}
-            className="bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-3 py-2 font-bold"
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-bold text-slate-700"
           >
             <option value="all">All Categories</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
               </option>
             ))}
           </select>
 
-          {/* Status Filter */}
           <select
             value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value as any)}
-            className="bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-3 py-2 font-bold"
+            onChange={(e) => setSelectedStatus(e.target.value as 'active' | 'archived' | 'all')}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-bold text-slate-700"
           >
             <option value="active">Active Items</option>
             <option value="archived">Archived Items</option>
@@ -209,67 +310,57 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
         </div>
       </div>
 
-      {/* Products Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs sm:text-sm">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[11px]">
-                <th className="py-3 px-4">Part Item & Details</th>
-                <th className="py-3 px-4">Category</th>
-                <th className="py-3 px-4 text-right">Cost Price</th>
-                <th className="py-3 px-4 text-right">Selling Price</th>
-                <th className="py-3 px-4 text-center">Stock</th>
-                <th className="py-3 px-4 text-center">Status</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+              <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase text-slate-500">
+                <th className="px-4 py-3">Product Details</th>
+                <th className="px-4 py-3">Category</th>
+                <th className="px-4 py-3 text-center">Unit</th>
+                <th className="px-4 py-3 text-right">Unit Cost</th>
+                <th className="px-4 py-3 text-right">Selling Price</th>
+                <th className="px-4 py-3 text-center">Low Stock Alert</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-400">
-                    No motorcycle parts found matching your criteria.
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                    No products found matching your criteria.
                   </td>
                 </tr>
               ) : (
-                filteredProducts.map((product) => {
-                  const categoryName = categories.find((c) => c.id === product.categoryId)?.name || 'Uncategorized';
-                  const isLowStock = product.currentStock > 0 && product.currentStock <= product.reorderLevel;
-                  const isOutOfStock = product.currentStock <= 0;
+                paginatedProducts.map((product) => {
+                  const categoryName =
+                    categories.find((category) => category.id === product.categoryId)?.name || 'Uncategorized';
 
                   return (
-                    <tr key={product.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-3.5 px-4">
+                    <tr key={product.id} className="transition-colors hover:bg-slate-50">
+                      <td className="px-4 py-3.5">
                         <div>
                           <p className="font-bold text-slate-900">{product.name}</p>
-                          <p className="text-[11px] font-mono text-slate-400">
-                            SKU: {product.sku} | Barcode: {product.barcode}
-                          </p>
+                          <p className="font-mono text-[11px] text-slate-400">SKU: {product.sku}</p>
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 font-medium text-slate-600">{categoryName}</td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-500">
-                        {settings.currencySymbol}{product.costPrice.toFixed(2)}
+                      <td className="px-4 py-3.5 font-medium text-slate-600">{categoryName}</td>
+                      <td className="px-4 py-3.5 text-center font-bold text-slate-600">{product.unit}</td>
+                      <td className="px-4 py-3.5 text-right font-mono text-slate-500">
+                        {settings.currencySymbol}
+                        {product.costPrice.toFixed(2)}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
-                        {settings.currencySymbol}{product.sellingPrice.toFixed(2)}
+                      <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-900">
+                        {settings.currencySymbol}
+                        {product.sellingPrice.toFixed(2)}
                       </td>
-                      <td className="py-3.5 px-4 text-center">
+                      <td className="px-4 py-3.5 text-center font-bold text-slate-700">
+                        {product.reorderLevel}
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
                         <span
-                          className={`inline-block px-2.5 py-0.5 rounded-full font-bold text-xs ${
-                            isOutOfStock
-                              ? 'bg-rose-100 text-rose-800'
-                              : isLowStock
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-blue-50 text-blue-800'
-                          }`}
-                        >
-                          {product.currentStock} {product.unit}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                          className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-bold ${
                             product.status === 'active'
                               ? 'bg-blue-100 text-blue-800'
                               : 'bg-slate-200 text-slate-600'
@@ -278,26 +369,67 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                           {product.status.toUpperCase()}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-right space-x-1">
+                      <td className="space-x-1 px-4 py-3.5 text-right">
                         <button
-                          onClick={() => openEdit(product)}
-                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition-colors"
-                          title="Edit Product"
+                          onClick={() => openView(product)}
+                          className="rounded-lg p-1.5 text-slate-600 transition-colors hover:bg-slate-200 hover:text-slate-900"
+                          title="View Product"
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <Eye className="h-4 w-4" />
                         </button>
                         {currentUser.role === 'admin' && (
-                          <button
-                            onClick={() => onToggleArchiveProduct(product.id)}
-                            className="p-1.5 rounded-lg text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition-colors"
-                            title={product.status === 'active' ? 'Archive Product' : 'Restore Product'}
-                          >
-                            {product.status === 'active' ? (
-                              <Archive className="w-4 h-4" />
-                            ) : (
-                              <RotateCcw className="w-4 h-4 text-blue-600" />
-                            )}
-                          </button>
+                          <>
+                            <button
+                              onClick={() => openEdit(product)}
+                              className="rounded-lg p-1.5 text-slate-600 transition-colors hover:bg-slate-200 hover:text-slate-900"
+                              title="Edit Product"
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await onToggleArchiveProduct(product.id);
+                                } catch (error) {
+                                  alert(
+                                    error instanceof Error
+                                      ? error.message
+                                      : 'Unable to update product status.',
+                                  );
+                                }
+                              }}
+                              className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                              title={product.status === 'active' ? 'Archive Product' : 'Restore Product'}
+                            >
+                              {product.status === 'active' ? (
+                                <Archive className="h-4 w-4" />
+                              ) : (
+                                <RotateCcw className="h-4 w-4 text-blue-600" />
+                              )}
+                            </button>
+                            <button
+                              onClick={async () => {
+                                const confirmed = window.confirm(
+                                  `Delete "${product.name}"? This only works if the product has never been used in sales or inventory transactions.`,
+                                );
+                                if (!confirmed) {
+                                  return;
+                                }
+
+                                try {
+                                  await onDeleteProduct(product.id);
+                                } catch (error) {
+                                  alert(
+                                    error instanceof Error ? error.message : 'Unable to delete product.',
+                                  );
+                                }
+                              }}
+                              className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-700"
+                              title="Delete Product"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </>
                         )}
                       </td>
                     </tr>
@@ -307,56 +439,55 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
             </tbody>
           </table>
         </div>
+        <PaginationControls
+          currentPage={currentPage}
+          totalItems={filteredProducts.length}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
-      {/* Add / Edit Product Modal */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-lg font-bold text-slate-900">
-                {editingProduct ? 'Edit Part Details' : 'Add New Motorcycle Part'}
+                {editingProduct ? 'Edit Product Information' : 'Add Product'}
               </h3>
               <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                onClick={() => {
+                  setIsAddModalOpen(false);
+                  setFormError(null);
+                  setFieldErrors({});
+                }}
+                className="rounded-lg p-1 text-slate-400 hover:text-slate-600"
               >
-                <X className="w-5 h-5" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <form onSubmit={handleFormSubmit} className="space-y-4 text-xs">
+            <form onSubmit={handleFormSubmit} className="space-y-4 pt-4 text-xs">
+              {formError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {formError}
+                </div>
+              )}
+
               <div className="space-y-1">
-                <label className="font-bold text-slate-700">Part Name *</label>
+                <label className="font-bold text-slate-700">Product Name *</label>
                 <input
                   type="text"
                   required
                   value={formData.name || ''}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g. Motul 300V 4T Synthetic Oil 10W-40 1L"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => {
+                    setFormData({ ...formData, name: e.target.value });
+                    setFieldErrors((current) => ({ ...current, name: '' }));
+                  }}
+                  placeholder="e.g. Premium Stainless Water Bottle"
+                  className={`w-full rounded-xl border bg-slate-50 p-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    fieldErrors.name ? 'border-rose-300 focus:ring-rose-400' : 'border-slate-200'
+                  }`}
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700">SKU Code</label>
-                  <input
-                    type="text"
-                    value={formData.sku || ''}
-                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Barcode</label>
-                  <input
-                    type="text"
-                    value={formData.barcode || ''}
-                    onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900"
-                  />
-                </div>
+                {fieldErrors.name && <p className="text-[11px] text-rose-600">{fieldErrors.name}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -364,23 +495,36 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                   <label className="font-bold text-slate-700">Category *</label>
                   <select
                     value={formData.categoryId || ''}
-                    onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold"
+                    onChange={(e) => {
+                      setFormData({ ...formData, categoryId: e.target.value });
+                      setFieldErrors((current) => ({ ...current, categoryId: '' }));
+                    }}
+                    className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
+                      fieldErrors.categoryId ? 'border-rose-300' : 'border-slate-200'
+                    }`}
                   >
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
+                    {activeCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
                       </option>
                     ))}
                   </select>
+                  {fieldErrors.categoryId && (
+                    <p className="text-[11px] text-rose-600">{fieldErrors.categoryId}</p>
+                  )}
                 </div>
 
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Unit of Measurement</label>
                   <select
                     value={formData.unit || 'pc'}
-                    onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold"
+                    onChange={(e) => {
+                      setFormData({ ...formData, unit: e.target.value });
+                      setFieldErrors((current) => ({ ...current, unit: '' }));
+                    }}
+                    className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
+                      fieldErrors.unit ? 'border-rose-300' : 'border-slate-200'
+                    }`}
                   >
                     <option value="pc">Piece (pc)</option>
                     <option value="set">Set</option>
@@ -390,71 +534,193 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                     <option value="pack">Pack</option>
                     <option value="box">Box</option>
                   </select>
+                  {fieldErrors.unit && <p className="text-[11px] text-rose-600">{fieldErrors.unit}</p>}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Cost Price ({settings.currencySymbol}) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={formData.costPrice || 0}
-                    onChange={(e) => setFormData({ ...formData, costPrice: parseFloat(e.target.value) || 0 })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900 font-bold"
-                  />
+                  <label className="font-bold text-slate-700">
+                    {editingProduct ? 'Stored Unit Cost' : `Total Purchase Cost (${settings.currencySymbol}) *`}
+                  </label>
+                  {editingProduct ? (
+                    <div className="w-full rounded-xl border border-slate-200 bg-slate-100 p-2.5 font-mono font-bold text-slate-700">
+                      {settings.currencySymbol}
+                      {(Number(formData.costPrice) || 0).toFixed(2)}
+                    </div>
+                  ) : (
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={totalPurchaseCost || ''}
+                      onChange={(e) => {
+                        setTotalPurchaseCost(parseFloat(e.target.value) || 0);
+                        setFieldErrors((current) => ({ ...current, totalPurchaseCost: '' }));
+                      }}
+                      placeholder="e.g. 3000.00"
+                      className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
+                        fieldErrors.totalPurchaseCost ? 'border-rose-300' : 'border-slate-200'
+                      }`}
+                    />
+                  )}
+                  {fieldErrors.totalPurchaseCost && (
+                    <p className="text-[11px] text-rose-600">{fieldErrors.totalPurchaseCost}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Selling Price ({settings.currencySymbol}) *</label>
+                  <label className="font-bold text-slate-700">
+                    Selling Price per Unit ({settings.currencySymbol}) *
+                  </label>
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
                     required
                     value={formData.sellingPrice || 0}
-                    onChange={(e) => setFormData({ ...formData, sellingPrice: parseFloat(e.target.value) || 0 })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900 font-bold"
+                    onChange={(e) => {
+                      setFormData({ ...formData, sellingPrice: parseFloat(e.target.value) || 0 });
+                      setFieldErrors((current) => ({ ...current, sellingPrice: '' }));
+                    }}
+                    className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
+                      fieldErrors.sellingPrice ? 'border-rose-300' : 'border-slate-200'
+                    }`}
                   />
+                  {fieldErrors.sellingPrice && (
+                    <p className="text-[11px] text-rose-600">{fieldErrors.sellingPrice}</p>
+                  )}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Initial Stock Quantity</label>
-                  <input
-                    type="number"
-                    value={formData.currentStock || 0}
-                    onChange={(e) => setFormData({ ...formData, currentStock: parseInt(e.target.value) || 0 })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900 font-bold"
-                  />
+                  <label className="font-bold text-slate-700">
+                    {editingProduct ? 'Current Stock (Read-only)' : 'Initial Stock Quantity *'}
+                  </label>
+                  {editingProduct ? (
+                    <div className="w-full rounded-xl border border-slate-200 bg-slate-100 p-2.5 font-mono font-bold text-slate-700">
+                      {editingProduct.currentStock} {editingProduct.unit}
+                    </div>
+                  ) : (
+                    <input
+                      type="number"
+                      min="1"
+                      required
+                      value={initialStockQuantity}
+                      onChange={(e) => {
+                        setInitialStockQuantity(parseInt(e.target.value, 10) || 0);
+                        setFieldErrors((current) => ({ ...current, initialStockQuantity: '' }));
+                      }}
+                      className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
+                        fieldErrors.initialStockQuantity ? 'border-rose-300' : 'border-slate-200'
+                      }`}
+                    />
+                  )}
+                  {fieldErrors.initialStockQuantity && (
+                    <p className="text-[11px] text-rose-600">{fieldErrors.initialStockQuantity}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Low Stock Reorder Level</label>
-                  <input
-                    type="number"
-                    value={formData.reorderLevel || 5}
-                    onChange={(e) => setFormData({ ...formData, reorderLevel: parseInt(e.target.value) || 5 })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900 font-bold"
-                  />
+                  <label className="font-bold text-slate-700">Unit Cost (Auto)</label>
+                  <div className="w-full rounded-xl border border-slate-200 bg-slate-100 p-2.5 font-mono font-bold text-slate-700">
+                    {settings.currencySymbol}
+                    {calculatedUnitCost.toFixed(2)}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex space-x-3 pt-3 border-t border-slate-100">
+              {fieldErrors.supplier && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+                  {fieldErrors.supplier}
+                </div>
+              )}
+
+              <div className="flex space-x-3 border-t border-slate-100 pt-3">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="w-1/2 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                  onClick={() => {
+                    setIsAddModalOpen(false);
+                    setFormError(null);
+                    setFieldErrors({});
+                  }}
+                  className="w-1/2 rounded-xl bg-slate-100 py-2.5 font-bold text-slate-700 hover:bg-slate-200"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold shadow-md"
+                  className="w-1/2 rounded-xl bg-blue-600 py-2.5 font-bold text-white shadow-md hover:bg-blue-500"
                 >
-                  Save Item
+                  Save Product
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {viewingProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-900">Product Information</h3>
+              <button
+                onClick={() => setViewingProduct(null)}
+                className="rounded-lg p-1 text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 pt-4 text-xs">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="font-bold text-slate-900">{viewingProduct.name}</p>
+                <p className="mt-0.5 font-mono text-slate-400">SKU: {viewingProduct.sku}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Category</p>
+                  <p className="mt-1 font-bold text-slate-900">
+                    {categories.find((category) => category.id === viewingProduct.categoryId)?.name || 'Uncategorized'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Unit</p>
+                  <p className="mt-1 font-bold text-slate-900">{viewingProduct.unit}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Unit Cost</p>
+                  <p className="mt-1 font-mono font-bold text-slate-900">
+                    {settings.currencySymbol}
+                    {viewingProduct.costPrice.toFixed(2)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Selling Price</p>
+                  <p className="mt-1 font-mono font-bold text-slate-900">
+                    {settings.currencySymbol}
+                    {viewingProduct.sellingPrice.toFixed(2)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Low Stock Alert</p>
+                  <p className="mt-1 font-bold text-slate-900">{viewingProduct.reorderLevel} or fewer</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Status</p>
+                  <p className="mt-1 font-bold text-slate-900">{viewingProduct.status.toUpperCase()}</p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setViewingProduct(null)}
+                className="w-full rounded-xl bg-slate-100 py-2.5 font-bold text-slate-700 hover:bg-slate-200"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

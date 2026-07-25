@@ -1,25 +1,25 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { User, StoreSettings } from '../types';
 import {
   ShoppingCart,
   LayoutDashboard,
   Package,
+  FolderTree,
   Receipt,
   DollarSign,
   BarChart3,
   Settings,
-  Shield,
   RefreshCw,
   Wrench,
   LogOut,
+  Menu,
+  X,
 } from 'lucide-react';
 
 interface HeaderProps {
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
+  pathname: string;
+  onNavigate: (path: string) => void;
   currentUser: User;
-  setCurrentUser: (user: User) => void;
-  users: User[];
   settings: StoreSettings;
   lowStockCount: number;
   outOfStockCount: number;
@@ -27,175 +27,196 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  activeTab,
-  setActiveTab,
+  pathname,
+  onNavigate,
   currentUser,
   settings,
-  lowStockCount,
-  outOfStockCount,
   onLogout,
 }) => {
-  const totalAlerts = lowStockCount + outOfStockCount;
-  // Clean user name dynamically from active user session
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const currentUserName = currentUser.name.replace(/\s*\([^)]*\)/g, '').trim();
+  const isAdmin = currentUser.role === 'admin';
+
+  const navItems = useMemo(
+    () =>
+      isAdmin
+        ? [
+            { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+            { path: '/pos', label: 'Point of Sale (POS)', icon: ShoppingCart, highlight: true },
+            { path: '/products', label: 'Products', icon: Package },
+            { path: '/categories', label: 'Categories', icon: FolderTree },
+            { path: '/inventory', label: 'Inventory', icon: RefreshCw },
+            { path: '/sales', label: 'Sales History', icon: Receipt },
+            { path: '/expenses', label: 'Expenses', icon: DollarSign },
+            { path: '/reports', label: 'Reports', icon: BarChart3 },
+            { path: '/settings', label: 'Settings', icon: Settings },
+          ]
+        : [
+            { path: '/pos', label: 'Point of Sale (POS)', icon: ShoppingCart, highlight: true },
+            { path: '/products', label: 'Products', icon: Package },
+            { path: '/inventory', label: 'Inventory', icon: RefreshCw },
+            { path: '/sales', label: 'Sales History', icon: Receipt },
+          ],
+    [isAdmin],
+  );
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    if (isMobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    }
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isMobileMenuOpen]);
+
+  const navButtonClass = (isActive: boolean, highlight?: boolean) =>
+    `flex items-center space-x-2 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors sm:text-sm ${
+      isActive
+        ? 'bg-blue-600 font-semibold text-white'
+        : highlight
+          ? 'border border-blue-500/30 bg-blue-950/40 text-blue-400 hover:bg-blue-900/60'
+          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+    }`;
+
+  const handleNavigate = (path: string) => {
+    onNavigate(path);
+    setIsMobileMenuOpen(false);
+  };
 
   return (
-    <header className="bg-slate-900 text-white shadow-md border-b border-slate-800 sticky top-0 z-30">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Brand & Store Name */}
-          <div
-            className="flex items-center space-x-3 cursor-pointer"
-            onClick={() => setActiveTab('dashboard')}
-          >
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-600/30 overflow-hidden shrink-0">
-              {settings.storeLogo ? (
-                <img
-                  src={settings.storeLogo}
-                  alt={settings.storeName}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <Wrench className="w-5 h-5 stroke-[2.5]" />
-              )}
-            </div>
-            <div>
-              <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-2">
-                {settings.storeName}
-              </h1>
-            </div>
-          </div>
-
-          {/* Current User Name with Admin / Cashier Role Indicator | Logout Display */}
-          <div className="flex items-center bg-slate-800/80 px-3.5 py-1.5 rounded-xl border border-slate-700/80 space-x-2.5 text-xs sm:text-sm font-medium">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-white tracking-wide">{currentUserName}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider ${
-                currentUser.role === 'admin'
-                  ? 'bg-blue-600/30 text-blue-300 border border-blue-500/40'
-                  : 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40'
-              }`}>
-                {currentUser.role === 'admin' ? 'Admin' : 'Cashier'}
-              </span>
-            </div>
-            <span className="text-slate-500 font-normal">|</span>
-            <button
-              onClick={onLogout}
-              className="flex items-center gap-1.5 text-rose-400 hover:text-rose-300 font-bold transition-colors cursor-pointer"
-              title="Logout session"
+    <>
+      <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-900 text-white shadow-md">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 items-center justify-between">
+            <div
+              className="flex min-w-0 cursor-pointer items-center space-x-3"
+              onClick={() => handleNavigate(isAdmin ? '/dashboard' : '/pos')}
             >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Logout</span>
-            </button>
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-blue-600 text-white font-bold shadow-lg shadow-blue-600/30">
+                {settings.storeLogo ? (
+                  <img
+                    src={settings.storeLogo}
+                    alt={settings.storeName}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <Wrench className="h-5 w-5 stroke-[2.5]" />
+                )}
+              </div>
+              <div>
+                <h1 className="flex items-center gap-2 text-lg font-extrabold tracking-tight text-white">
+                  {settings.storeName}
+                </h1>
+              </div>
+            </div>
+
+            <div className="hidden items-center rounded-xl border border-slate-700/80 bg-slate-800/80 px-3.5 py-1.5 text-xs font-medium sm:text-sm lg:flex">
+              <div className="flex items-center gap-2">
+                <span className="max-w-32 truncate font-bold tracking-wide text-white">
+                  {currentUserName}
+                </span>
+                <span
+                  className={`rounded-md border px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider ${
+                    currentUser.role === 'admin'
+                      ? 'border-blue-500/40 bg-blue-600/30 text-blue-300'
+                      : 'border-emerald-500/40 bg-emerald-600/30 text-emerald-300'
+                  }`}
+                >
+                  {currentUser.role === 'admin' ? 'Admin' : 'Cashier'}
+                </span>
+              </div>
+              <span className="mx-2.5 text-slate-500">|</span>
+              <button
+                onClick={onLogout}
+                className="flex cursor-pointer items-center gap-1.5 font-bold text-rose-400 transition-colors hover:text-rose-300"
+                title="Logout session"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Logout</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 lg:hidden">
+              <button
+                onClick={() => setIsMobileMenuOpen((open) => !open)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-200"
+                aria-label={isMobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              >
+                {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              </button>
+            </div>
+          </div>
+
+          <div className="hidden border-t border-slate-800 lg:block">
+            <nav className="flex items-center space-x-1 overflow-x-auto py-2 text-xs scrollbar-none sm:text-sm">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = pathname === item.path;
+                return (
+                  <button
+                    key={item.path}
+                    onClick={() => handleNavigate(item.path)}
+                    className={navButtonClass(isActive, item.highlight)}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
           </div>
         </div>
+      </header>
 
-        {/* Primary Navigation Tabs */}
-        <div className="flex items-center space-x-1 overflow-x-auto py-2 border-t border-slate-800 scrollbar-none text-xs sm:text-sm">
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-30 lg:hidden">
           <button
-            onClick={() => setActiveTab('dashboard')}
-            className={`flex items-center space-x-2 px-3 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-              activeTab === 'dashboard'
-                ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            <span>Dashboard</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('pos')}
-            className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-              activeTab === 'pos'
-                ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                : 'text-blue-400 bg-blue-950/40 border border-blue-500/30 hover:bg-blue-900/60'
-            }`}
-          >
-            <ShoppingCart className="w-4 h-4" />
-            <span>Point of Sale (POS)</span>
-          </button>
-
-          {/* Products */}
-          <button
-            onClick={() => setActiveTab('products')}
-            className={`flex items-center space-x-2 px-3 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-              activeTab === 'products'
-                ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            <Package className="w-4 h-4" />
-            <span>Products</span>
-          </button>
-
-          {/* Inventory */}
-          <button
-            onClick={() => setActiveTab('inventory')}
-            className={`flex items-center space-x-2 px-3 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-              activeTab === 'inventory'
-                ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Inventory</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('sales')}
-            className={`flex items-center space-x-2 px-3 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-              activeTab === 'sales'
-                ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            <Receipt className="w-4 h-4" />
-            <span>Sales History</span>
-          </button>
-
-          {/* Admin Restricted Views */}
-          {currentUser.role === 'admin' && (
-            <>
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            onClick={() => setIsMobileMenuOpen(false)}
+            aria-label="Close mobile menu overlay"
+          />
+          <div className="absolute inset-x-4 top-20 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-700/80 bg-slate-800/80 px-3.5 py-2.5 text-sm font-medium">
+              <div className="min-w-0">
+                <p className="truncate font-bold text-white">{currentUserName}</p>
+                <p className="text-xs text-slate-400">
+                  {currentUser.role === 'admin' ? 'Administrator' : 'Cashier'}
+                </p>
+              </div>
               <button
-                onClick={() => setActiveTab('expenses')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-                  activeTab === 'expenses'
-                    ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
+                onClick={onLogout}
+                className="flex items-center gap-1.5 font-bold text-rose-400 transition-colors hover:text-rose-300"
               >
-                <DollarSign className="w-4 h-4" />
-                <span>Expenses</span>
+                <LogOut className="h-4 w-4" />
+                <span>Logout</span>
               </button>
+            </div>
 
-              <button
-                onClick={() => setActiveTab('reports')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-                  activeTab === 'reports'
-                    ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
-              >
-                <BarChart3 className="w-4 h-4" />
-                <span>Reports</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('settings')}
-                className={`flex items-center space-x-2 px-3 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-                  activeTab === 'settings'
-                    ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
-              >
-                <Settings className="w-4 h-4" />
-                <span>Settings</span>
-              </button>
-            </>
-          )}
+            <nav className="grid gap-2">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = pathname === item.path;
+                return (
+                  <button
+                    key={item.path}
+                    onClick={() => handleNavigate(item.path)}
+                    className={`${navButtonClass(isActive, item.highlight)} w-full justify-start`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
         </div>
-      </div>
-    </header>
+      )}
+    </>
   );
 };

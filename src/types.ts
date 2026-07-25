@@ -16,6 +16,8 @@ export interface User {
   pin?: string;
   active: boolean;
   permissions?: UserPermissions;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Category {
@@ -23,6 +25,7 @@ export interface Category {
   name: string;
   description?: string;
   productCount?: number;
+  active?: boolean;
 }
 
 export interface Supplier {
@@ -38,7 +41,7 @@ export interface Supplier {
 export interface Product {
   id: string;
   sku: string;
-  barcode: string;
+  barcode?: string;
   name: string;
   description?: string;
   categoryId: string;
@@ -75,6 +78,7 @@ export interface SaleItem {
 export interface Transaction {
   id: string;
   receiptNumber: string;
+  occurredAt: string;
   timestamp: string;
   cashierId: string;
   cashierName: string;
@@ -103,8 +107,8 @@ export interface StockReceivingItem {
 export interface StockReceivingRecord {
   id: string;
   referenceNumber: string;
-  supplierId: string;
-  supplierName: string;
+  supplierId?: string;
+  supplierName?: string;
   deliveryDate: string;
   items: StockReceivingItem[];
   totalAmount: number;
@@ -117,13 +121,36 @@ export interface StockAdjustment {
   id: string;
   productId: string;
   productName: string;
-  adjustmentType: 'add' | 'remove';
+  adjustmentType: 'increase' | 'decrease';
   quantity: number;
-  reason: 'damaged' | 'expired' | 'lost' | 'returned' | 'correction' | 'personal_use';
+  reason:
+    | 'damaged'
+    | 'lost'
+    | 'returned'
+    | 'physical_count_correction'
+    | 'shop_use'
+    | 'encoding_error'
+    | 'other';
   previousStock: number;
   newStock: number;
   notes?: string;
   user: string;
+  timestamp: string;
+}
+
+export interface InventoryMovement {
+  id: string;
+  productId: string;
+  productName: string;
+  movementType: 'stock_in' | 'adjustment' | 'sale' | 'sale_void';
+  previousStock: number;
+  quantityChanged: number;
+  newStock: number;
+  unitCost?: number;
+  referenceNumber?: string;
+  notes?: string;
+  user: string;
+  occurredAt: string;
   timestamp: string;
 }
 
@@ -156,4 +183,77 @@ export interface StoreSettings {
   taxRate?: number;
   allowNegativeStock: boolean;
   receiptFooter?: string;
+}
+
+export interface AuthProfile {
+  id: string;
+  name: string;
+  username: string;
+  role: Role;
+  active: boolean;
+}
+
+export interface AppSnapshot {
+  settings: StoreSettings;
+  users: User[];
+  categories: Category[];
+  suppliers: Supplier[];
+  products: Product[];
+  transactions: Transaction[];
+  expenses: Expense[];
+  adjustments: StockAdjustment[];
+  receivingRecords: StockReceivingRecord[];
+  inventoryMovements: InventoryMovement[];
+  auditLogs: AuditLog[];
+}
+
+export interface ProductInput {
+  id?: string;
+  sku?: string;
+  barcode?: string;
+  name: string;
+  description?: string;
+  categoryId: string;
+  supplierId: string;
+  unit: string;
+  costPrice: number;
+  totalPurchaseCost?: number;
+  sellingPrice: number;
+  currentStock: number;
+  reorderLevel: number;
+  maxStock?: number;
+  status: 'active' | 'archived';
+}
+
+export interface CategoryInput {
+  name: string;
+  description?: string;
+}
+
+export interface SaleCheckoutItemInput {
+  productId: string;
+  quantity: number;
+}
+
+export interface SaleCheckoutInput {
+  paymentMethod: PaymentMethod;
+  amountReceived: number;
+  discountTotal: number;
+  items: SaleCheckoutItemInput[];
+}
+
+export interface ExpenseInput {
+  category: string;
+  description: string;
+  amount: number;
+  referenceNumber?: string;
+}
+
+export interface UserUpsertInput {
+  id?: string;
+  name: string;
+  username: string;
+  password?: string;
+  role: Role;
+  active?: boolean;
 }

@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Transaction, User, StoreSettings } from '../types';
+import { PaginationControls } from './PaginationControls';
 import { Search, Receipt, AlertTriangle, Eye, X } from 'lucide-react';
 
 interface SalesHistoryViewProps {
   transactions: Transaction[];
   currentUser: User;
   settings: StoreSettings;
-  onVoidTransaction: (transactionId: string, reason: string) => void;
+  onVoidTransaction: (transactionId: string, reason: string) => Promise<void> | void;
 }
 
 export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
@@ -20,12 +21,14 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
   const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [txToVoid, setTxToVoid] = useState<Transaction | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const filteredTransactions = transactions.filter(
     (t) =>
       t.receiptNumber.toLowerCase().includes(search.toLowerCase()) ||
       t.cashierName.toLowerCase().includes(search.toLowerCase())
   );
+  const paginatedTransactions = filteredTransactions.slice((currentPage - 1) * 10, currentPage * 10);
 
   const openVoidModal = (tx: Transaction) => {
     if (currentUser.role !== 'admin') {
@@ -37,17 +40,21 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
     setIsVoidModalOpen(true);
   };
 
-  const handleConfirmVoid = (e: React.FormEvent) => {
+  const handleConfirmVoid = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!txToVoid || !voidReason) {
       alert('Please provide a mandatory reason for voiding this receipt.');
       return;
     }
 
-    onVoidTransaction(txToVoid.id, voidReason);
-    alert(`Receipt #${txToVoid.receiptNumber} voided. Restored product stock automatically.`);
-    setIsVoidModalOpen(false);
-    setTxToVoid(null);
+    try {
+      await onVoidTransaction(txToVoid.id, voidReason);
+      alert(`Receipt #${txToVoid.receiptNumber} voided. Restored product stock automatically.`);
+      setIsVoidModalOpen(false);
+      setTxToVoid(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to void transaction.');
+    }
   };
 
   return (
@@ -92,7 +99,7 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredTransactions.map((tx) => (
+              {paginatedTransactions.map((tx) => (
                 <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
                   <td className="py-3.5 px-4 font-mono font-bold text-slate-900">{tx.receiptNumber}</td>
                   <td className="py-3.5 px-4 text-slate-500 text-xs">{tx.timestamp}</td>
@@ -137,6 +144,11 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
             </tbody>
           </table>
         </div>
+        <PaginationControls
+          currentPage={currentPage}
+          totalItems={filteredTransactions.length}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       {/* Transaction Detail Modal */}

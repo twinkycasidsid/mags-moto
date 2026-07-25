@@ -11,12 +11,21 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    define: {
+      __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0'),
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      proxy: {
+        '/api': {
+          target: process.env.VITE_API_BASE_URL ?? 'http://localhost:3001',
+          changeOrigin: true,
+        },
+      },
     },
   };
 });

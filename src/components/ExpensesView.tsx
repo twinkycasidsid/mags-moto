@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
-import { Expense, User, StoreSettings } from '../types';
-import { DollarSign } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Expense, StoreSettings, User } from '../types';
+import { PaginationControls } from './PaginationControls';
+import { DollarSign, Edit2, Plus, Trash2, X } from 'lucide-react';
 
 interface ExpensesViewProps {
   expenses: Expense[];
   currentUser: User;
   settings: StoreSettings;
-  onAddExpense: (expense: Expense) => void;
+  onAddExpense: (expense: Expense) => Promise<void> | void;
+  onEditExpense: (expense: Expense) => Promise<void> | void;
+  onDeleteExpense: (expenseId: string) => Promise<void> | void;
 }
 
 export const ExpensesView: React.FC<ExpensesViewProps> = ({
@@ -14,145 +17,305 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   currentUser,
   settings,
   onAddExpense,
+  onEditExpense,
+  onDeleteExpense,
 }) => {
-  const [category, setCategory] = useState('Utilities');
-  const [description, setDescription] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [category, setCategory] = useState('');
+  const [typeOfExpense, setTypeOfExpense] = useState('');
   const [amount, setAmount] = useState<number>(0);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!description || amount <= 0) return;
+  const totalExpense = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const sortedExpenses = useMemo(
+    () => [...expenses].sort((a, b) => b.date.localeCompare(a.date)),
+    [expenses],
+  );
+  const paginatedExpenses = useMemo(() => {
+    const start = (currentPage - 1) * 10;
+    return sortedExpenses.slice(start, start + 10);
+  }, [currentPage, sortedExpenses]);
 
-    const newExp: Expense = {
-      id: `exp-${Date.now()}`,
-      category,
-      description,
-      amount,
-      date: new Date().toISOString().split('T')[0],
-      recordedBy: currentUser.name,
-    };
-
-    onAddExpense(newExp);
-    setDescription('');
+  const resetForm = () => {
+    setEditingExpense(null);
+    setCategory('');
+    setTypeOfExpense('');
     setAmount(0);
+    setFormError(null);
+    setFieldErrors({});
   };
 
-  const totalExpense = expenses.reduce((s, e) => s + e.amount, 0);
+  const openAddModal = () => {
+    resetForm();
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (expense: Expense) => {
+    setEditingExpense(expense);
+    setCategory(expense.category);
+    setTypeOfExpense(expense.description);
+    setAmount(expense.amount);
+    setFormError(null);
+    setFieldErrors({});
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    resetForm();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const nextErrors: Record<string, string> = {};
+    if (!category.trim()) {
+      nextErrors.category = 'Expense category is required.';
+    }
+    if (!typeOfExpense.trim()) {
+      nextErrors.typeOfExpense = 'Type of expense is required.';
+    }
+    if (amount <= 0) {
+      nextErrors.amount = 'Amount must be greater than zero.';
+    }
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setFormError('Please correct the highlighted fields.');
+      return;
+    }
+
+    const expensePayload: Expense = {
+      id: editingExpense ? editingExpense.id : `exp-${Date.now()}`,
+      category: category.trim(),
+      description: typeOfExpense.trim(),
+      amount,
+      date: editingExpense ? editingExpense.date : new Date().toISOString().split('T')[0],
+      referenceNumber: editingExpense?.referenceNumber,
+      recordedBy: editingExpense?.recordedBy ?? currentUser.name,
+    };
+
+    try {
+      if (editingExpense) {
+        await onEditExpense(expensePayload);
+      } else {
+        await onAddExpense(expensePayload);
+      }
+      closeModal();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Unable to save expense.');
+    }
+  };
+
+  if (currentUser.role !== 'admin') {
+    return null;
+  }
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
-            <DollarSign className="w-6 h-6 text-blue-600" />
-            <span>Store Overhead Expenses Manager</span>
+          <h2 className="flex items-center gap-2 text-xl font-extrabold text-slate-900">
+            <DollarSign className="h-6 w-6 text-blue-600" />
+            <span>Store Expenses</span>
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Record Mags Moto operating costs (electricity, rent, salaries, shop tools) to calculate net profit.
+          <p className="mt-0.5 text-xs text-slate-500">
+            Record and manage operating expenses to keep net profit reporting accurate.
           </p>
         </div>
 
-        <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 text-right">
-          <p className="text-xs text-blue-800 font-bold">Total Expenses Logged</p>
-          <p className="text-xl font-black text-blue-700">
-            {settings.currencySymbol}{totalExpense.toFixed(2)}
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-right">
+            <p className="text-xs font-bold text-blue-800">Total Expenses Logged</p>
+            <p className="text-xl font-black text-blue-700">
+              {settings.currencySymbol}
+              {totalExpense.toFixed(2)}
+            </p>
+          </div>
+
+          <button
+            onClick={openAddModal}
+            className="flex items-center space-x-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-md transition-all hover:bg-blue-500"
+          >
+            <Plus className="h-4 w-4 stroke-[3]" />
+            <span>Add Expense</span>
+          </button>
         </div>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-6">
-        {/* Record Expense Form */}
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-          <h3 className="font-bold text-slate-900 text-sm">Record Shop Expense</h3>
-          <form onSubmit={handleSubmit} className="space-y-3 text-xs">
-            <div className="space-y-1">
-              <label className="font-bold text-slate-700">Expense Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900"
-              >
-                <option value="Utilities">Utilities (Power, Water, Net)</option>
-                <option value="Rent">Shop Rent</option>
-                <option value="Salaries">Mechanic / Staff Salaries</option>
-                <option value="Shop Supplies">Shop Supplies (Bags, Tools, Cleaning)</option>
-                <option value="Repairs">Repairs & Maintenance</option>
-                <option value="Miscellaneous">Miscellaneous</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="font-bold text-slate-700">Description / Details *</label>
-              <input
-                type="text"
-                required
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g. Monthly Electricity Bill"
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="font-bold text-slate-700">Amount ({settings.currencySymbol}) *</label>
-              <input
-                type="number"
-                step="0.01"
-                required
-                value={amount || ''}
-                onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold font-mono text-slate-900"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md transition-colors"
-            >
-              Log Expense
-            </button>
-          </form>
-        </div>
-
-        {/* Expenses List */}
-        <div className="md:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-          <h3 className="font-bold text-slate-900 text-sm">Expense History Log</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
-                  <th className="p-2.5">Date</th>
-                  <th className="p-2.5">Category</th>
-                  <th className="p-2.5">Description</th>
-                  <th className="p-2.5 text-right">Amount</th>
-                  <th className="p-2.5">Recorded By</th>
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs sm:text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase text-slate-500">
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Expense Category</th>
+                <th className="px-4 py-3">Type of Expense</th>
+                <th className="px-4 py-3 text-right">Amount</th>
+                <th className="px-4 py-3">Recorded By</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {sortedExpenses.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-slate-400">
+                    No shop expenses logged yet.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
-                {expenses.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="text-center py-8 text-slate-400">
-                      No shop expenses logged yet.
+              ) : (
+                paginatedExpenses.map((expense) => (
+                  <tr key={expense.id} className="transition-colors hover:bg-slate-50">
+                    <td className="px-4 py-3.5 font-mono text-slate-500">{expense.date}</td>
+                    <td className="px-4 py-3.5 font-bold text-slate-900">{expense.category}</td>
+                    <td className="px-4 py-3.5 text-slate-600">{expense.description}</td>
+                    <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-900">
+                      {settings.currencySymbol}
+                      {expense.amount.toFixed(2)}
+                    </td>
+                    <td className="px-4 py-3.5 text-slate-500">{expense.recordedBy}</td>
+                    <td className="space-x-1 px-4 py-3.5 text-right">
+                      <button
+                        onClick={() => openEditModal(expense)}
+                        className="rounded-lg p-1.5 text-slate-600 transition-colors hover:bg-slate-200"
+                        title="Edit Expense"
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Delete this expense entry for "${expense.description}"?`)) {
+                            return;
+                          }
+                          try {
+                            await onDeleteExpense(expense.id);
+                          } catch (error) {
+                            alert(
+                              error instanceof Error ? error.message : 'Unable to delete expense.',
+                            );
+                          }
+                        }}
+                        className="rounded-lg p-1.5 text-rose-500 transition-colors hover:bg-rose-50"
+                        title="Delete Expense"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </td>
                   </tr>
-                ) : (
-                  expenses.map((exp) => (
-                    <tr key={exp.id}>
-                      <td className="p-2.5 text-slate-500 font-mono">{exp.date}</td>
-                      <td className="p-2.5 font-bold text-slate-900">{exp.category}</td>
-                      <td className="p-2.5 text-slate-600">{exp.description}</td>
-                      <td className="p-2.5 text-right font-mono font-bold text-slate-900">
-                        {settings.currencySymbol}{exp.amount.toFixed(2)}
-                      </td>
-                      <td className="p-2.5 text-slate-500">{exp.recordedBy}</td>
-                    </tr>
-                  ))
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <PaginationControls
+          currentPage={currentPage}
+          totalItems={sortedExpenses.length}
+          onPageChange={setCurrentPage}
+        />
+      </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-900">
+                {editingExpense ? 'Edit Expense' : 'Add Expense'}
+              </h3>
+              <button onClick={closeModal} className="rounded-lg p-1 text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4 pt-4 text-xs">
+              {formError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {formError}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">Expense Category *</label>
+                <input
+                  type="text"
+                  required
+                  value={category}
+                  onChange={(e) => {
+                    setCategory(e.target.value);
+                    setFieldErrors((current) => ({ ...current, category: '' }));
+                  }}
+                  placeholder="e.g. Utilities"
+                  className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
+                    fieldErrors.category ? 'border-rose-300' : 'border-slate-200'
+                  }`}
+                />
+                {fieldErrors.category && (
+                  <p className="text-[11px] text-rose-600">{fieldErrors.category}</p>
                 )}
-              </tbody>
-            </table>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">Type of Expense *</label>
+                <input
+                  type="text"
+                  required
+                  value={typeOfExpense}
+                  onChange={(e) => {
+                    setTypeOfExpense(e.target.value);
+                    setFieldErrors((current) => ({ ...current, typeOfExpense: '' }));
+                  }}
+                  placeholder="e.g. Monthly Electricity Bill"
+                  className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
+                    fieldErrors.typeOfExpense ? 'border-rose-300' : 'border-slate-200'
+                  }`}
+                />
+                {fieldErrors.typeOfExpense && (
+                  <p className="text-[11px] text-rose-600">{fieldErrors.typeOfExpense}</p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">Amount ({settings.currencySymbol}) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  value={amount || ''}
+                  onChange={(e) => {
+                    setAmount(parseFloat(e.target.value) || 0);
+                    setFieldErrors((current) => ({ ...current, amount: '' }));
+                  }}
+                  className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
+                    fieldErrors.amount ? 'border-rose-300' : 'border-slate-200'
+                  }`}
+                />
+                {fieldErrors.amount && (
+                  <p className="text-[11px] text-rose-600">{fieldErrors.amount}</p>
+                )}
+              </div>
+
+              <div className="flex gap-3 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="w-1/2 rounded-xl bg-slate-100 py-2.5 font-bold text-slate-700 hover:bg-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 rounded-xl bg-blue-600 py-2.5 font-bold text-white shadow-md hover:bg-blue-500"
+                >
+                  {editingExpense ? 'Save Expense' : 'Add Expense'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

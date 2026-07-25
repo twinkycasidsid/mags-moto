@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Product, Category, CartItem, PaymentMethod, Transaction, User, StoreSettings } from '../types';
+import { Product, Category, CartItem, PaymentMethod, Transaction, User, StoreSettings, SaleCheckoutInput } from '../types';
 import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, DollarSign, Check, X } from 'lucide-react';
 
 interface POSViewProps {
@@ -7,7 +7,7 @@ interface POSViewProps {
   categories: Category[];
   currentUser: User;
   settings: StoreSettings;
-  onCompleteTransaction: (transaction: Transaction) => void;
+  onCompleteTransaction: (transaction: SaleCheckoutInput) => Promise<Transaction>;
 }
 
 export const POSView: React.FC<POSViewProps> = ({
@@ -26,6 +26,7 @@ export const POSView: React.FC<POSViewProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [amountReceived, setAmountReceived] = useState<string>('');
   const [discountAmount, setDiscountAmount] = useState<string>('');
+  const [isProcessingSale, setIsProcessingSale] = useState(false);
   
   // Completed Receipt Modal state
   const [lastCompletedTx, setLastCompletedTx] = useState<Transaction | null>(null);
@@ -103,7 +104,11 @@ export const POSView: React.FC<POSViewProps> = ({
     setIsCheckoutOpen(true);
   };
 
-  const handleProcessSale = () => {
+  const handleProcessSale = async () => {
+    if (isProcessingSale) {
+      return;
+    }
+
     const receivedNum = parseFloat(amountReceived) || 0;
     const discountVal = Math.max(0, parseFloat(discountAmount) || 0);
     const netTotal = Math.max(0, subtotal - discountVal);
@@ -113,40 +118,26 @@ export const POSView: React.FC<POSViewProps> = ({
       return;
     }
 
-    const changeGiven = Math.max(0, receivedNum - netTotal);
-    const receiptNum = `RCP-${new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 12)}`;
+    setIsProcessingSale(true);
+    try {
+      const transaction = await onCompleteTransaction({
+        paymentMethod,
+        amountReceived: receivedNum,
+        discountTotal: discountVal,
+        items: cart.map((item) => ({
+          productId: item.product.id,
+          quantity: item.quantity,
+        })),
+      });
 
-    const transaction: Transaction = {
-      id: `tx-${Date.now()}`,
-      receiptNumber: receiptNum,
-      timestamp: new Date().toLocaleString(),
-      cashierId: currentUser.id,
-      cashierName: currentUser.name,
-      items: cart.map((item) => ({
-        productId: item.product.id,
-        productName: item.product.name,
-        quantity: item.quantity,
-        unitPrice: item.product.sellingPrice,
-        costPrice: item.product.costPrice,
-        discount: item.discount,
-        subtotal: item.product.sellingPrice * item.quantity,
-      })),
-      subtotal,
-      discountTotal: discountVal,
-      taxTotal: 0,
-      grandTotal: netTotal,
-      totalCost,
-      estimatedProfit: netTotal - totalCost,
-      paymentMethod,
-      amountReceived: receivedNum,
-      changeGiven,
-      status: 'completed',
-    };
-
-    onCompleteTransaction(transaction);
-    setLastCompletedTx(transaction);
-    setIsCheckoutOpen(false);
-    clearCart();
+      setLastCompletedTx(transaction);
+      setIsCheckoutOpen(false);
+      clearCart();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to complete sale.');
+    } finally {
+      setIsProcessingSale(false);
+    }
   };
 
   const discountVal = Math.max(0, parseFloat(discountAmount) || 0);
@@ -414,10 +405,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
               {/* Optional Discount Field below Amount Received */}
               <div className="space-y-1.5">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-slate-700">Discount Amount (Optional)</label>
-                  <span className="text-[10px] text-slate-400 font-medium">Optional</span>
-                </div>
+                <label className="text-xs font-bold text-slate-700">Discount Amount</label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-2 font-bold text-slate-400 text-xs">
                     {settings.currencySymbol}
@@ -445,16 +433,22 @@ export const POSView: React.FC<POSViewProps> = ({
 
             <div className="flex space-x-3 pt-2">
               <button
-                onClick={() => setIsCheckoutOpen(false)}
+                onClick={() => {
+                  if (!isProcessingSale) {
+                    setIsCheckoutOpen(false);
+                  }
+                }}
+                disabled={isProcessingSale}
                 className="w-1/2 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
               >
                 Cancel
               </button>
               <button
                 onClick={handleProcessSale}
-                className="w-1/2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-md"
+                disabled={isProcessingSale}
+                className="w-1/2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-bold text-xs shadow-md"
               >
-                Confirm Payment
+                {isProcessingSale ? 'Processing...' : 'Confirm Payment'}
               </button>
             </div>
           </div>
@@ -477,8 +471,6 @@ export const POSView: React.FC<POSViewProps> = ({
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 font-mono text-xs space-y-2">
               <div className="text-center border-b border-dashed border-slate-300 pb-2">
                 <p className="font-bold text-slate-900 text-sm">{settings.storeName}</p>
-                <p className="text-[10px] text-slate-500">{settings.address}</p>
-                <p className="text-[10px] text-slate-500">Tel: {settings.phone}</p>
                 <p className="text-[10px] font-bold text-slate-700 mt-1">Receipt #: {lastCompletedTx.receiptNumber}</p>
               </div>
 
@@ -516,10 +508,6 @@ export const POSView: React.FC<POSViewProps> = ({
                   <span>Change:</span>
                   <span>{settings.currencySymbol}{lastCompletedTx.changeGiven.toFixed(2)}</span>
                 </div>
-              </div>
-
-              <div className="text-center text-[10px] text-slate-400 pt-2 border-t border-dashed border-slate-300 font-sans">
-                {settings.receiptFooter}
               </div>
             </div>
 
