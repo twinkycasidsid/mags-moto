@@ -1,0 +1,6 @@
+{
+  "name": "Mags Moto",
+  "description": "Mags Moto - Motorcycle Parts & Accessories Point of Sale and Inventory Management System with stock tracking, sales processing, cashier roles, and financial reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
