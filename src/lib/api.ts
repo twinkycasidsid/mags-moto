@@ -1,9 +1,15 @@
+import { env } from './env';
+
 export const apiFetch = async <T>(
   path: string,
   accessToken: string,
   init?: RequestInit,
 ): Promise<T> => {
-  const response = await fetch(path, {
+  const normalizedBaseUrl = env.apiBaseUrl.replace(/\/+$/, '');
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const requestUrl = normalizedBaseUrl ? `${normalizedBaseUrl}${normalizedPath}` : normalizedPath;
+
+  const response = await fetch(requestUrl, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
