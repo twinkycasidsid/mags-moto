@@ -169,7 +169,10 @@ export const useAppData = (profile: AuthProfile | null, accessToken: string | nu
 
       const usersQuery =
         profile.role === 'admin'
-          ? apiFetch<User[]>('/api/admin/users', accessToken)
+          ? apiFetch<User[]>('/api/admin/users', accessToken).catch((usersError) => {
+              console.error('Unable to load admin users.', usersError);
+              return [];
+            })
           : Promise.resolve([]);
 
       const [

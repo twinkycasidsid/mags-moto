@@ -19,8 +19,19 @@ export const apiFetch = async <T>(
   });
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(body.error ?? 'Request failed');
+    const responseText = await response.text().catch(() => '');
+    let message = 'Request failed';
+
+    if (responseText) {
+      try {
+        const parsed = JSON.parse(responseText) as { error?: string; message?: string };
+        message = parsed.error ?? parsed.message ?? responseText;
+      } catch {
+        message = responseText;
+      }
+    }
+
+    throw new Error(message);
   }
 
   if (response.status === 204) {
