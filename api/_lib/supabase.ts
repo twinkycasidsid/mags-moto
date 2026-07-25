@@ -13,13 +13,3 @@ export const supabaseAdmin = createClient(apiEnv.supabaseUrl, apiEnv.serviceRole
     transport: WebSocketTransport,
   },
 });
-
-export const supabaseAuth = createClient(apiEnv.supabaseUrl, apiEnv.anonKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-  realtime: {
-    transport: WebSocketTransport,
-  },
-});

@@ -1,6 +1,6 @@
 import type { Role } from '../../src/types';
 import type { ApiRequestLike } from './http';
-import { supabaseAdmin, supabaseAuth } from './supabase';
+import { supabaseAdmin } from './supabase';
 
 export interface AuthenticatedUser {
   id: string;
@@ -31,7 +31,7 @@ export const requireAuth = async (req: AuthenticatedRequestLike) => {
     throw new Error('Unauthorized');
   }
 
-  const { data: userData, error: userError } = await supabaseAuth.auth.getUser(token);
+  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
   if (userError || !userData.user) {
     throw new Error('Unauthorized');
   }
