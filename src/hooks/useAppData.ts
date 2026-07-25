@@ -75,7 +75,11 @@ const fetchTransactionById = async (transactionId: string) => {
   return mapTransaction(data);
 };
 
-export const useAppData = (profile: AuthProfile | null, accessToken: string | null) => {
+export const useAppData = (
+  profile: AuthProfile | null,
+  accessToken: string | null,
+  options?: { loadAdminUsers?: boolean },
+) => {
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
   const [publicSettings, setPublicSettings] = useState<StoreSettings>(emptySnapshot.settings);
   const [loading, setLoading] = useState(true);
@@ -168,7 +172,7 @@ export const useAppData = (profile: AuthProfile | null, accessToken: string | nu
           : Promise.resolve({ data: [], error: null } as any);
 
       const usersQuery =
-        profile.role === 'admin'
+        profile.role === 'admin' && options?.loadAdminUsers
           ? apiFetch<User[]>('/api/admin/users', accessToken).catch((usersError) => {
               console.error('Unable to load admin users.', usersError);
               return [];
@@ -241,7 +245,7 @@ export const useAppData = (profile: AuthProfile | null, accessToken: string | nu
         setLoading(false);
       }
     }
-  }, [accessToken, profile]);
+  }, [accessToken, options?.loadAdminUsers, profile]);
 
   useEffect(() => {
     void loadPublicSettings();

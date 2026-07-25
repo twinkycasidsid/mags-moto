@@ -45,7 +45,7 @@ export interface Product {
   name: string;
   description?: string;
   categoryId: string;
-  supplierId: string;
+  supplierId?: string;
   unit: string; // 'pc', 'pack', 'bottle', 'kg', etc.
   costPrice: number;
   sellingPrice: number;
@@ -214,7 +214,7 @@ export interface ProductInput {
   name: string;
   description?: string;
   categoryId: string;
-  supplierId: string;
+  supplierId?: string;
   unit: string;
   costPrice: number;
   totalPurchaseCost?: number;

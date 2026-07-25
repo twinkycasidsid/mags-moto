@@ -52,13 +52,11 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const activeCategories = categories.filter((category) => category.active !== false);
-  const defaultSupplierId = suppliers[0]?.id ?? '';
 
   const [formData, setFormData] = useState<Partial<Product>>({
     name: '',
     sku: '',
     categoryId: activeCategories[0]?.id || categories[0]?.id || '',
-    supplierId: defaultSupplierId,
     unit: 'pc',
     costPrice: 0,
     sellingPrice: 0,
@@ -84,11 +82,6 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   }, [editingProduct, formData.costPrice, initialStockQuantity, totalPurchaseCost]);
 
   const openAdd = () => {
-    if (!defaultSupplierId) {
-      alert('No supplier record is available. Add a supplier first before creating products.');
-      return;
-    }
-
     setFormError(null);
     setFieldErrors({});
     setEditingProduct(null);
@@ -98,7 +91,6 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
       name: '',
       sku: '',
       categoryId: activeCategories[0]?.id || categories[0]?.id || '',
-      supplierId: defaultSupplierId,
       unit: 'pc',
       costPrice: 0,
       sellingPrice: 0,
@@ -150,10 +142,6 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
       }
     }
 
-    if (!defaultSupplierId && !editingProduct?.supplierId && !formData.supplierId) {
-      nextErrors.supplier = 'No supplier is available. Add a supplier first before saving a product.';
-    }
-
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       setFormError('Please correct the highlighted fields.');
@@ -166,7 +154,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
       name: formData.name,
       description: formData.description || '',
       categoryId: formData.categoryId!,
-      supplierId: editingProduct?.supplierId || formData.supplierId || defaultSupplierId,
+      supplierId: editingProduct?.supplierId || formData.supplierId || undefined,
       unit: formData.unit || 'pc',
       costPrice: editingProduct ? Number(formData.costPrice) || 0 : calculatedUnitCost,
       sellingPrice: Number(formData.sellingPrice) || 0,
@@ -629,12 +617,6 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                   </div>
                 </div>
               </div>
-
-              {fieldErrors.supplier && (
-                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
-                  {fieldErrors.supplier}
-                </div>
-              )}
 
               <div className="flex space-x-3 border-t border-slate-100 pt-3">
                 <button

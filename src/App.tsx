@@ -62,6 +62,7 @@ const AppShell = () => {
   const navigate = useNavigate();
   const { session, profile, loading: authLoading, loggingIn, login, logout } = useAuth();
   const accessToken = session?.access_token ?? null;
+  const shouldLoadAdminUsers = location.pathname === '/settings';
   const {
     snapshot,
     publicSettings,
@@ -87,7 +88,7 @@ const AppShell = () => {
     deleteUser,
     resetUserPassword,
     recordSessionEvent,
-  } = useAppData(profile, accessToken);
+  } = useAppData(profile, accessToken, { loadAdminUsers: shouldLoadAdminUsers });
 
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
 
