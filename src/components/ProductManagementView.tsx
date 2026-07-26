@@ -14,6 +14,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { parseSanitizedNumber, sanitizeNumericInput } from '../lib/numericInput';
 
 interface ProductManagementViewProps {
   products: Product[];
@@ -52,7 +53,9 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPurchaseCost, setTotalPurchaseCost] = useState<number>(0);
+  const [totalPurchaseCostInput, setTotalPurchaseCostInput] = useState('');
   const [initialStockQuantity, setInitialStockQuantity] = useState<number>(1);
+  const [initialStockQuantityInput, setInitialStockQuantityInput] = useState('1');
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -71,6 +74,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
     reorderLevel: calculateLowStockLevel(1),
     status: 'active',
   });
+  const [sellingPriceInput, setSellingPriceInput] = useState('');
 
   const lowStockLevel = useMemo(
     () => calculateLowStockLevel(editingProduct ? editingProduct.currentStock : initialStockQuantity),
@@ -97,7 +101,9 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
     setFieldErrors({});
     setEditingProduct(null);
     setTotalPurchaseCost(0);
+    setTotalPurchaseCostInput('');
     setInitialStockQuantity(1);
+    setInitialStockQuantityInput('1');
     setFormData({
       name: '',
       sku: '',
@@ -109,6 +115,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
       reorderLevel: calculateLowStockLevel(1),
       status: 'active',
     });
+    setSellingPriceInput('');
     setIsAddModalOpen(true);
   };
 
@@ -117,8 +124,11 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
     setFieldErrors({});
     setEditingProduct(product);
     setTotalPurchaseCost(0);
+    setTotalPurchaseCostInput('');
     setInitialStockQuantity(product.currentStock);
+    setInitialStockQuantityInput(product.currentStock.toString());
     setFormData(product);
+    setSellingPriceInput(product.sellingPrice.toString());
     setIsAddModalOpen(true);
   };
 
@@ -130,7 +140,6 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
     const nextErrors: Record<string, string> = {};
     setFormError(null);
     const normalizedName = formData.name?.trim().replace(/\s+/g, ' ') ?? '';
-    const normalizedDescription = formData.description?.trim() ?? '';
 
     if (!normalizedName) {
       nextErrors.name = 'Product name is required.';
@@ -144,10 +153,6 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
 
     if (!formData.unit?.trim()) {
       nextErrors.unit = 'Unit of measurement is required.';
-    }
-
-    if (normalizedDescription.length > 500) {
-      nextErrors.description = 'Description must be 500 characters or fewer.';
     }
 
     if ((Number(formData.sellingPrice) || 0) < 0) {
@@ -185,7 +190,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
       id: editingProduct ? editingProduct.id : `prod-${Date.now()}`,
       sku: editingProduct?.sku || formData.sku || '',
       name: normalizedName,
-      description: normalizedDescription,
+      description: editingProduct?.description ?? '',
       categoryId: formData.categoryId!,
       unit: formData.unit || 'pc',
       costPrice: editingProduct ? Number(formData.costPrice) || 0 : calculatedUnitCost,
@@ -272,23 +277,21 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
 
   const handleExportCSV = () => {
     const headers = [
-      'SKU',
       'Product Name',
       'Category',
       'Unit',
       'Unit Cost',
       'Selling Price',
-      'Low Stock Alert Level',
+      'Number of Stocks',
       'Status',
     ];
     const rows = filteredProducts.map((product) => [
-      product.sku,
       `"${product.name.replace(/"/g, '""')}"`,
       categories.find((category) => category.id === product.categoryId)?.name || 'Uncategorized',
       product.unit,
       product.costPrice,
       product.sellingPrice,
-      product.reorderLevel,
+      product.currentStock,
       product.status,
     ]);
 
@@ -346,7 +349,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Search by product name or SKU..."
+            placeholder="Search by product name..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -389,7 +392,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                 <th className="px-4 py-3 text-center">Unit</th>
                 <th className="px-4 py-3 text-right">Unit Cost</th>
                 <th className="px-4 py-3 text-right">Selling Price</th>
-                <th className="px-4 py-3 text-center">Low Stock Alert</th>
+                <th className="px-4 py-3 text-center">Number of Stocks</th>
                 <th className="px-4 py-3 text-center">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -409,10 +412,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                   return (
                     <tr key={product.id} className="transition-colors hover:bg-slate-50">
                       <td className="px-4 py-3.5">
-                        <div>
-                          <p className="font-bold text-slate-900">{product.name}</p>
-                          <p className="font-mono text-[11px] text-slate-400">SKU: {product.sku}</p>
-                        </div>
+                        <p className="font-bold text-slate-900">{product.name}</p>
                       </td>
                       <td className="px-4 py-3.5 font-medium text-slate-600">{categoryName}</td>
                       <td className="px-4 py-3.5 text-center font-bold text-slate-600">{product.unit}</td>
@@ -425,7 +425,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                         {product.sellingPrice.toFixed(2)}
                       </td>
                       <td className="px-4 py-3.5 text-center font-bold text-slate-700">
-                        {product.reorderLevel}
+                        {product.currentStock}
                       </td>
                       <td className="px-4 py-3.5 text-center">
                         <span
@@ -629,30 +629,6 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="font-bold text-slate-700">Description</label>
-                <textarea
-                  value={formData.description || ''}
-                  onChange={(e) => {
-                    setFormData({ ...formData, description: e.target.value });
-                    setFieldErrors((current) => ({ ...current, description: '' }));
-                  }}
-                  maxLength={500}
-                  placeholder="Optional product description"
-                  className={`h-24 w-full rounded-xl border bg-slate-50 p-2.5 text-sm text-slate-900 ${
-                    fieldErrors.description ? 'border-rose-300' : 'border-slate-200'
-                  }`}
-                />
-                <div className="flex items-center justify-between">
-                  {fieldErrors.description ? (
-                    <p className="text-[11px] text-rose-600">{fieldErrors.description}</p>
-                  ) : (
-                    <span />
-                  )}
-                  <p className="text-[11px] text-slate-400">{(formData.description || '').length}/500</p>
-                </div>
-              </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">
@@ -665,13 +641,17 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                     </div>
                   ) : (
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
+                      type="text"
+                      inputMode="decimal"
+                      pattern="[0-9]*[.]?[0-9]*"
                       required
-                      value={totalPurchaseCost || ''}
+                      value={totalPurchaseCostInput}
                       onChange={(e) => {
-                        setTotalPurchaseCost(parseFloat(e.target.value) || 0);
+                        const sanitizedValue = sanitizeNumericInput(e.target.value, {
+                          allowDecimal: true,
+                        });
+                        setTotalPurchaseCostInput(sanitizedValue);
+                        setTotalPurchaseCost(parseSanitizedNumber(sanitizedValue));
                         setFieldErrors((current) => ({ ...current, totalPurchaseCost: '' }));
                       }}
                       placeholder="e.g. 3000.00"
@@ -689,13 +669,20 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                     Selling Price per Unit ({settings.currencySymbol}) *
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*[.]?[0-9]*"
                     required
-                    value={formData.sellingPrice || 0}
+                    value={sellingPriceInput}
                     onChange={(e) => {
-                      setFormData({ ...formData, sellingPrice: parseFloat(e.target.value) || 0 });
+                      const sanitizedValue = sanitizeNumericInput(e.target.value, {
+                        allowDecimal: true,
+                      });
+                      setSellingPriceInput(sanitizedValue);
+                      setFormData({
+                        ...formData,
+                        sellingPrice: parseSanitizedNumber(sanitizedValue),
+                      });
                       setFieldErrors((current) => ({ ...current, sellingPrice: '' }));
                     }}
                     className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
@@ -729,12 +716,15 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                     </div>
                   ) : (
                     <input
-                      type="number"
-                      min="1"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       required
-                      value={initialStockQuantity}
+                      value={initialStockQuantityInput}
                       onChange={(e) => {
-                        setInitialStockQuantity(parseInt(e.target.value, 10) || 0);
+                        const sanitizedValue = sanitizeNumericInput(e.target.value);
+                        setInitialStockQuantityInput(sanitizedValue);
+                        setInitialStockQuantity(parseSanitizedNumber(sanitizedValue));
                         setFieldErrors((current) => ({ ...current, initialStockQuantity: '' }));
                       }}
                       className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
@@ -796,7 +786,6 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
             <div className="space-y-3 pt-4 text-xs">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="font-bold text-slate-900">{viewingProduct.name}</p>
-                <p className="mt-0.5 font-mono text-slate-400">SKU: {viewingProduct.sku}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -825,8 +814,8 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                   </p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Low Stock Alert</p>
-                  <p className="mt-1 font-bold text-slate-900">{viewingProduct.reorderLevel} or fewer</p>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Number of Stocks</p>
+                  <p className="mt-1 font-bold text-slate-900">{viewingProduct.currentStock}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Status</p>

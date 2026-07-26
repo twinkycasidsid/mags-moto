@@ -1070,7 +1070,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                 <input
                   type="text"
-                  placeholder="Search product or SKU..."
+                  placeholder="Search product..."
                   value={inventorySearch}
                   onChange={(e) => {
                     setInventorySearch(e.target.value);
@@ -1111,7 +1111,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         <tr key={idx} className="hover:bg-slate-50">
                           <td className="p-3">
                             <p className="font-bold text-slate-900">{item.name}</p>
-                            {item.product && <p className="text-[10px] text-slate-400 font-mono">SKU: {item.product.sku}</p>}
                           </td>
                           <td className="p-3 text-slate-500">{item.categoryName}</td>
                           <td className="p-3 text-center font-bold text-blue-600">{item.unitsSold}</td>

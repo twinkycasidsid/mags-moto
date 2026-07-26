@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Product, Category, CartItem, PaymentMethod, Transaction, User, StoreSettings, SaleCheckoutInput } from '../types';
 import { useFeedback } from './FeedbackProvider';
 import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, DollarSign, Check, X } from 'lucide-react';
+import { sanitizeNumericInput } from '../lib/numericInput';
 
 interface POSViewProps {
   products: Product[];
@@ -184,7 +185,7 @@ export const POSView: React.FC<POSViewProps> = ({
             <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-3" />
             <input
               type="text"
-              placeholder="Search part name, SKU, or barcode..."
+              placeholder="Search part name or barcode..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -241,7 +242,7 @@ export const POSView: React.FC<POSViewProps> = ({
               >
                 <div>
                   <div className="flex items-start justify-between">
-                    <span className="text-[10px] font-mono font-semibold text-slate-400">{p.sku}</span>
+                    <span />
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
                         isOutOfStock
@@ -440,12 +441,14 @@ export const POSView: React.FC<POSViewProps> = ({
                     {settings.currencySymbol}
                   </span>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*[.]?[0-9]*"
                     value={amountReceived}
-                    min="0"
                     onChange={(e) => {
-                      setAmountReceived(e.target.value);
+                      setAmountReceived(
+                        sanitizeNumericInput(e.target.value, { allowDecimal: true }),
+                      );
                       setCheckoutErrors((current) => ({ ...current, amountReceived: '' }));
                     }}
                     className={`w-full rounded-xl border bg-slate-50 py-2.5 pl-8 pr-4 text-lg font-bold text-slate-900 focus:outline-none focus:ring-2 ${
@@ -468,13 +471,15 @@ export const POSView: React.FC<POSViewProps> = ({
                     {settings.currencySymbol}
                   </span>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*[.]?[0-9]*"
                     placeholder="0.00"
                     value={discountAmount}
                     onChange={(e) => {
-                      setDiscountAmount(e.target.value);
+                      setDiscountAmount(
+                        sanitizeNumericInput(e.target.value, { allowDecimal: true }),
+                      );
                       setCheckoutErrors((current) => ({ ...current, discountAmount: '' }));
                     }}
                     className={`w-full rounded-xl border bg-slate-50 py-2 pl-8 pr-4 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 ${

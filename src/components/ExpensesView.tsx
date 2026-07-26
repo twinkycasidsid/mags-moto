@@ -3,6 +3,7 @@ import { Expense, StoreSettings, User } from '../types';
 import { useFeedback } from './FeedbackProvider';
 import { PaginationControls } from './PaginationControls';
 import { DollarSign, Edit2, Plus, Trash2, X } from 'lucide-react';
+import { parseSanitizedNumber, sanitizeNumericInput } from '../lib/numericInput';
 
 interface ExpensesViewProps {
   expenses: Expense[];
@@ -28,6 +29,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   const [category, setCategory] = useState('');
   const [typeOfExpense, setTypeOfExpense] = useState('');
   const [amount, setAmount] = useState<number>(0);
+  const [amountInput, setAmountInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,6 +50,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     setCategory('');
     setTypeOfExpense('');
     setAmount(0);
+    setAmountInput('');
     setFormError(null);
     setFieldErrors({});
   };
@@ -62,6 +65,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     setCategory(expense.category);
     setTypeOfExpense(expense.description);
     setAmount(expense.amount);
+    setAmountInput(expense.amount.toString());
     setFormError(null);
     setFieldErrors({});
     setIsModalOpen(true);
@@ -314,13 +318,17 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">Amount ({settings.currencySymbol}) *</label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.]?[0-9]*"
                   required
-                  value={amount || ''}
+                  value={amountInput}
                   onChange={(e) => {
-                    setAmount(parseFloat(e.target.value) || 0);
+                    const sanitizedValue = sanitizeNumericInput(e.target.value, {
+                      allowDecimal: true,
+                    });
+                    setAmountInput(sanitizedValue);
+                    setAmount(parseSanitizedNumber(sanitizedValue));
                     setFieldErrors((current) => ({ ...current, amount: '' }));
                   }}
                   className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${

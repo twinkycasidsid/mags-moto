@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
+import { parseSanitizedNumber, sanitizeNumericInput } from '../lib/numericInput';
 
 interface InventoryViewProps {
   products: Product[];
@@ -66,7 +67,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [selectedProductForHistory, setSelectedProductForHistory] = useState<Product | null>(null);
 
   const [quantityReceived, setQuantityReceived] = useState(1);
+  const [quantityReceivedInput, setQuantityReceivedInput] = useState('1');
   const [totalPurchaseCost, setTotalPurchaseCost] = useState(0);
+  const [totalPurchaseCostInput, setTotalPurchaseCostInput] = useState('');
   const [receivingNotes, setReceivingNotes] = useState('');
   const [stockInErrors, setStockInErrors] = useState<Record<string, string>>({});
   const [stockInFormError, setStockInFormError] = useState<string | null>(null);
@@ -74,6 +77,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   const [adjustmentType, setAdjustmentType] = useState<'increase' | 'decrease'>('decrease');
   const [adjustmentQuantity, setAdjustmentQuantity] = useState(1);
+  const [adjustmentQuantityInput, setAdjustmentQuantityInput] = useState('1');
   const [adjustmentReason, setAdjustmentReason] =
     useState<StockAdjustment['reason']>('damaged');
   const [adjustmentNotes, setAdjustmentNotes] = useState('');
@@ -156,7 +160,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const resetAddStockForm = (product: Product) => {
     setSelectedProductForAdd(product);
     setQuantityReceived(1);
+    setQuantityReceivedInput('1');
     setTotalPurchaseCost(0);
+    setTotalPurchaseCostInput('');
     setReceivingNotes('');
     setStockInErrors({});
     setStockInFormError(null);
@@ -166,6 +172,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setSelectedProductForAdjust(product);
     setAdjustmentType('decrease');
     setAdjustmentQuantity(1);
+    setAdjustmentQuantityInput('1');
     setAdjustmentReason('damaged');
     setAdjustmentNotes('');
     setAdjustmentErrors({});
@@ -298,7 +305,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Search inventory by product name or SKU..."
+            placeholder="Search inventory by product name..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -493,12 +500,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Quantity Received *</label>
                   <input
-                    type="number"
-                    min="1"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     required
-                    value={quantityReceived}
+                    value={quantityReceivedInput}
                     onChange={(e) => {
-                      setQuantityReceived(parseInt(e.target.value, 10) || 0);
+                      const sanitizedValue = sanitizeNumericInput(e.target.value);
+                      setQuantityReceivedInput(sanitizedValue);
+                      setQuantityReceived(parseSanitizedNumber(sanitizedValue));
                       setStockInErrors((current) => ({ ...current, quantityReceived: '' }));
                     }}
                     className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
@@ -512,13 +522,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Total Purchase Cost ({settings.currencySymbol}) *</label>
                   <input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*[.]?[0-9]*"
                     required
-                    value={totalPurchaseCost || ''}
+                    value={totalPurchaseCostInput}
                     onChange={(e) => {
-                      setTotalPurchaseCost(parseFloat(e.target.value) || 0);
+                      const sanitizedValue = sanitizeNumericInput(e.target.value, {
+                        allowDecimal: true,
+                      });
+                      setTotalPurchaseCostInput(sanitizedValue);
+                      setTotalPurchaseCost(parseSanitizedNumber(sanitizedValue));
                       setStockInErrors((current) => ({ ...current, totalPurchaseCost: '' }));
                     }}
                     className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
@@ -643,12 +657,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Quantity *</label>
                   <input
-                    type="number"
-                    min="1"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     required
-                    value={adjustmentQuantity}
+                    value={adjustmentQuantityInput}
                     onChange={(e) => {
-                      setAdjustmentQuantity(parseInt(e.target.value, 10) || 0);
+                      const sanitizedValue = sanitizeNumericInput(e.target.value);
+                      setAdjustmentQuantityInput(sanitizedValue);
+                      setAdjustmentQuantity(parseSanitizedNumber(sanitizedValue));
                       setAdjustmentErrors((current) => ({ ...current, quantity: '' }));
                     }}
                     className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
