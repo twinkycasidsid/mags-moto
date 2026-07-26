@@ -20,7 +20,11 @@ interface ProductManagementViewProps {
   categories: Category[];
   settings: StoreSettings;
   currentUser: User;
-  onSaveProduct: (product: Product, totalPurchaseCost?: number) => Promise<void> | void;
+  onSaveProduct: (
+    product: Product,
+    totalPurchaseCost?: number,
+    options?: { allowBelowCost?: boolean },
+  ) => Promise<void> | void;
   onToggleArchiveProduct: (productId: string) => Promise<void> | void;
   onDeleteProduct: (productId: string) => Promise<void> | void;
   isAddModalOpen: boolean;
@@ -54,6 +58,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [busyProductId, setBusyProductId] = useState<string | null>(null);
   const activeCategories = categories.filter((category) => category.active !== false);
+  const formatMoney = (value: number) => `${settings.currencySymbol}${value.toFixed(2)}`;
 
   const [formData, setFormData] = useState<Partial<Product>>({
     name: '',
@@ -82,6 +87,10 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
 
     return Number((totalPurchaseCost / initialStockQuantity).toFixed(2));
   }, [editingProduct, formData.costPrice, initialStockQuantity, totalPurchaseCost]);
+  const sellingPriceValue = Number(formData.sellingPrice) || 0;
+  const unitCostDifference = Number((sellingPriceValue - calculatedUnitCost).toFixed(2));
+  const isBreakEvenPricing = sellingPriceValue > 0 && calculatedUnitCost > 0 && unitCostDifference === 0;
+  const isBelowCostPricing = sellingPriceValue > 0 && calculatedUnitCost > 0 && unitCostDifference < 0;
 
   const openAdd = () => {
     setFormError(null);
@@ -190,7 +199,52 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
 
     try {
       setIsSubmitting(true);
-      await onSaveProduct(productToSave, editingProduct ? undefined : totalPurchaseCost);
+      let allowBelowCost = false;
+      if (productToSave.sellingPrice < productToSave.costPrice) {
+        const lossPerUnit = Number((productToSave.costPrice - productToSave.sellingPrice).toFixed(2));
+        const estimatedProfitOrLoss = Number((productToSave.sellingPrice - productToSave.costPrice).toFixed(2));
+        const approved = await confirm({
+          title: 'Selling Price Below Cost',
+          message: `The selling price you entered (${formatMoney(productToSave.sellingPrice)}) is lower than the product's unit cost (${formatMoney(productToSave.costPrice)}).`,
+          confirmLabel: 'Save Anyway',
+          cancelLabel: 'Go Back',
+          tone: 'warning',
+          details: (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p>Selling this product at this price will result in a loss of {formatMoney(lossPerUnit)} per unit.</p>
+              <div className="mt-3 space-y-1 text-xs font-semibold">
+                <div className="flex justify-between gap-4">
+                  <span>Unit Cost</span>
+                  <span>{formatMoney(productToSave.costPrice)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span>Selling Price</span>
+                  <span>{formatMoney(productToSave.sellingPrice)}</span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span>Loss per Unit</span>
+                  <span>-{formatMoney(lossPerUnit)}</span>
+                </div>
+                <div className="flex justify-between gap-4 border-t border-amber-200 pt-2 font-bold">
+                  <span>Estimated Profit or Loss</span>
+                  <span>-{formatMoney(Math.abs(estimatedProfitOrLoss))}</span>
+                </div>
+              </div>
+            </div>
+          ),
+        });
+
+        if (!approved) {
+          setIsSubmitting(false);
+          return;
+        }
+
+        allowBelowCost = true;
+      }
+
+      await onSaveProduct(productToSave, editingProduct ? undefined : totalPurchaseCost, {
+        allowBelowCost,
+      });
       notify(editingProduct ? 'Product updated successfully.' : 'Product created successfully.', 'success');
       setFormError(null);
       setFieldErrors({});
@@ -650,6 +704,16 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                   />
                   {fieldErrors.sellingPrice && (
                     <p className="text-[11px] text-rose-600">{fieldErrors.sellingPrice}</p>
+                  )}
+                  {!fieldErrors.sellingPrice && isBelowCostPricing && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                      Warning: this price is below the unit cost by {formatMoney(Math.abs(unitCostDifference))} per unit. Saving will require confirmation.
+                    </div>
+                  )}
+                  {!fieldErrors.sellingPrice && isBreakEvenPricing && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                      Warning: This product will generate no profit because the selling price is equal to the unit cost.
+                    </div>
                   )}
                 </div>
               </div>

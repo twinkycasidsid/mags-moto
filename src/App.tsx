@@ -175,7 +175,11 @@ const AppShell = () => {
     navigate('/login', { replace: true });
   };
 
-  const handleSaveProduct = async (product: Product, totalPurchaseCost?: number) => {
+  const handleSaveProduct = async (
+    product: Product,
+    totalPurchaseCost?: number,
+    options?: { allowBelowCost?: boolean },
+  ) => {
     await saveProduct({
       id: isUuid(product.id) ? product.id : undefined,
       sku: product.sku || undefined,
@@ -191,6 +195,7 @@ const AppShell = () => {
       reorderLevel: product.reorderLevel,
       maxStock: product.maxStock,
       status: product.status,
+      allowBelowCost: options?.allowBelowCost,
     });
   };
 

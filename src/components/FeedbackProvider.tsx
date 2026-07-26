@@ -14,7 +14,8 @@ interface ConfirmOptions {
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  tone?: 'default' | 'danger';
+  tone?: 'default' | 'danger' | 'warning';
+  details?: React.ReactNode;
 }
 
 interface ConfirmState extends ConfirmOptions {
@@ -118,7 +119,9 @@ export const FeedbackProvider: React.FC<React.PropsWithChildren> = ({ children }
                 className={`rounded-xl p-2 ${
                   confirmState.tone === 'danger'
                     ? 'bg-rose-100 text-rose-700'
-                    : 'bg-blue-100 text-blue-700'
+                    : confirmState.tone === 'warning'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-blue-100 text-blue-700'
                 }`}
               >
                 <AlertTriangle className="h-5 w-5" />
@@ -126,6 +129,7 @@ export const FeedbackProvider: React.FC<React.PropsWithChildren> = ({ children }
               <div className="space-y-1">
                 <h3 className="text-base font-bold text-slate-900">{confirmState.title}</h3>
                 <p className="text-sm text-slate-600">{confirmState.message}</p>
+                {confirmState.details && <div className="pt-2">{confirmState.details}</div>}
               </div>
             </div>
 
@@ -142,8 +146,10 @@ export const FeedbackProvider: React.FC<React.PropsWithChildren> = ({ children }
                 onClick={() => closeConfirm(true)}
                 className={`w-1/2 rounded-xl py-2.5 text-sm font-bold text-white transition ${
                   confirmState.tone === 'danger'
-                    ? 'bg-rose-600 hover:bg-rose-700'
-                    : 'bg-blue-600 hover:bg-blue-500'
+                  ? 'bg-rose-600 hover:bg-rose-700'
+                    : confirmState.tone === 'warning'
+                      ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                      : 'bg-blue-600 hover:bg-blue-500'
                 }`}
               >
                 {confirmState.confirmLabel ?? 'Confirm'}

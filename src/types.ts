@@ -208,6 +208,7 @@ export interface ProductInput {
   reorderLevel: number;
   maxStock?: number;
   status: 'active' | 'archived';
+  allowBelowCost?: boolean;
 }
 
 export interface CategoryInput {
