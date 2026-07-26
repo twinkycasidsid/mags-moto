@@ -7,7 +7,6 @@ import type {
   StockAdjustment,
   StockReceivingRecord,
   StoreSettings,
-  Supplier,
   Transaction,
   User,
 } from '../types';
@@ -64,16 +63,6 @@ export const mapCategory = (row: any): Category => ({
   active: typeof row.active === 'boolean' ? row.active : true,
 });
 
-export const mapSupplier = (row: any): Supplier => ({
-  id: row.id,
-  name: row.name,
-  contactPerson: row.contact_person ?? '',
-  phone: row.phone ?? '',
-  email: row.email ?? '',
-  address: row.address ?? '',
-  active: Boolean(row.active),
-});
-
 export const mapProduct = (row: any): Product => ({
   id: row.id,
   sku: row.sku,
@@ -81,7 +70,6 @@ export const mapProduct = (row: any): Product => ({
   name: row.name,
   description: row.description ?? '',
   categoryId: row.category_id,
-  supplierId: row.supplier_id,
   unit: row.unit,
   costPrice: Number(row.cost_price),
   sellingPrice: Number(row.selling_price),
@@ -149,8 +137,6 @@ export const mapStockAdjustment = (row: any): StockAdjustment => ({
 export const mapReceivingRecord = (row: any): StockReceivingRecord => ({
   id: row.id,
   referenceNumber: row.reference_number,
-  supplierId: row.supplier_id ?? undefined,
-  supplierName: row.supplier?.name ?? undefined,
   deliveryDate: row.delivery_date,
   totalAmount: Number(row.total_amount),
   recordedBy: row.recorder?.name ?? 'Unknown',

@@ -16,19 +16,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    const nextErrors: typeof fieldErrors = {};
 
     const cleanUsername = username.trim().toLowerCase();
     if (!cleanUsername) {
-      setError('Please enter your username.');
-      return;
+      nextErrors.username = 'Username is required.';
     }
 
     if (!password) {
-      setError('Please enter your password / PIN.');
+      nextErrors.password = 'Password / PIN is required.';
+    }
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setError('Please correct the highlighted fields.');
       return;
     }
 
@@ -83,11 +89,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             <input
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setFieldErrors((current) => ({ ...current, username: undefined }));
+              }}
               placeholder="Enter username"
               autoFocus
-              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-2xl text-white text-sm font-semibold placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+              maxLength={50}
+              className={`w-full rounded-2xl border px-4 py-3 text-sm font-semibold text-white placeholder:text-slate-500 transition-all focus:outline-none focus:ring-1 ${
+                fieldErrors.username
+                  ? 'border-rose-500 bg-rose-950/30 focus:border-rose-400 focus:ring-rose-400'
+                  : 'border-slate-700 bg-slate-800 focus:border-blue-500 focus:ring-blue-500'
+              }`}
             />
+            {fieldErrors.username && (
+              <p className="text-[11px] font-semibold text-rose-400">{fieldErrors.username}</p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -98,10 +115,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             <input
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setFieldErrors((current) => ({ ...current, password: undefined }));
+              }}
               placeholder="Enter password"
-              className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-2xl text-white text-sm font-semibold placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+              maxLength={72}
+              className={`w-full rounded-2xl border px-4 py-3 text-sm font-semibold text-white placeholder:text-slate-500 transition-all focus:outline-none focus:ring-1 ${
+                fieldErrors.password
+                  ? 'border-rose-500 bg-rose-950/30 focus:border-rose-400 focus:ring-rose-400'
+                  : 'border-slate-700 bg-slate-800 focus:border-blue-500 focus:ring-blue-500'
+              }`}
             />
+            {fieldErrors.password && (
+              <p className="text-[11px] font-semibold text-rose-400">{fieldErrors.password}</p>
+            )}
           </div>
 
           <button

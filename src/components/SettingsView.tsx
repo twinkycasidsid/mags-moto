@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { StoreSettings, User, AuditLog, Role } from '../types';
+import { useFeedback } from './FeedbackProvider';
 import { PaginationControls } from './PaginationControls';
 import {
   Settings,
@@ -51,8 +52,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onDeleteUser,
   onResetUserPassword,
 }) => {
+  const { confirm, notify } = useFeedback();
   const [activeTab, setActiveTab] = useState<'users' | 'system' | 'history'>('users');
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [systemErrors, setSystemErrors] = useState<Record<string, string>>({});
+  const [systemFormError, setSystemFormError] = useState<string | null>(null);
+  const [isSavingSystem, setIsSavingSystem] = useState(false);
 
   const [systemForm, setSystemForm] = useState({
     storeName: settings.storeName || 'Mags Moto',
@@ -69,9 +74,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     role: 'cashier' as Role,
     password: '',
   });
+  const [userFormErrors, setUserFormErrors] = useState<Record<string, string>>({});
+  const [userFormError, setUserFormError] = useState<string | null>(null);
+  const [isSavingUser, setIsSavingUser] = useState(false);
 
   const [resetModalUser, setResetModalUser] = useState<User | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [userPage, setUserPage] = useState(1);
   const [logPage, setLogPage] = useState(1);
 
@@ -105,22 +115,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSaveSystemSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!systemForm.storeName.trim()) {
-      alert('Store Name cannot be empty.');
+    if (isSavingSystem) {
       return;
     }
 
-    await onSaveSettings(
-      {
-        ...settings,
-        storeName: systemForm.storeName.trim(),
-        storeLogo: logoFile ? '' : systemForm.storeLogo,
-      },
-      logoFile,
-    );
+    const normalizedStoreName = systemForm.storeName.trim().replace(/\s+/g, ' ');
+    const nextErrors: Record<string, string> = {};
+    if (!normalizedStoreName) {
+      nextErrors.storeName = 'Store name is required.';
+    } else if (normalizedStoreName.length > 120) {
+      nextErrors.storeName = 'Store name must be 120 characters or fewer.';
+    }
 
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
+    setSystemErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setSystemFormError('Please correct the highlighted fields.');
+      return;
+    }
+
+    try {
+      setIsSavingSystem(true);
+      setSystemFormError(null);
+      await onSaveSettings(
+        {
+          ...settings,
+          storeName: normalizedStoreName,
+          storeLogo: logoFile ? '' : systemForm.storeLogo,
+        },
+        logoFile,
+      );
+
+      setSavedSuccess(true);
+      notify('Store settings saved successfully.', 'success');
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } catch (error) {
+      setSystemFormError(error instanceof Error ? error.message : 'Unable to save settings.');
+    } finally {
+      setIsSavingSystem(false);
+    }
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -130,10 +162,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
 
     if (file.size > 2 * 1024 * 1024) {
-      alert('Image file size should be less than 2MB.');
+      setSystemFormError('Image file size should be less than 2MB.');
+      notify('Image file size should be less than 2MB.', 'error');
+      e.target.value = '';
       return;
     }
 
+    if (!/^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.type)) {
+      setSystemFormError('Please upload a valid image file.');
+      notify('Please upload a valid image file.', 'error');
+      e.target.value = '';
+      return;
+    }
+
+    setSystemFormError(null);
     setLogoFile(file);
     setLogoPreview(URL.createObjectURL(file));
   };
@@ -146,6 +188,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       role: 'cashier',
       password: '',
     });
+    setUserFormErrors({});
+    setUserFormError(null);
     setIsUserModalOpen(true);
   };
 
@@ -157,25 +201,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       role: user.role,
       password: '',
     });
+    setUserFormErrors({});
+    setUserFormError(null);
     setIsUserModalOpen(true);
   };
 
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userFormData.name.trim() || !userFormData.username.trim()) {
-      alert('Name and username are required.');
+    if (isSavingUser) {
       return;
     }
 
+    const nextErrors: Record<string, string> = {};
+    const normalizedName = userFormData.name.trim().replace(/\s+/g, ' ');
+    const normalizedUsername = userFormData.username.trim().toLowerCase();
+
+    if (!normalizedName) {
+      nextErrors.name = 'Full name is required.';
+    } else if (normalizedName.length > 120) {
+      nextErrors.name = 'Full name must be 120 characters or fewer.';
+    }
+
+    if (!normalizedUsername) {
+      nextErrors.username = 'Username is required.';
+    } else if (!/^[a-z0-9._-]+$/.test(normalizedUsername)) {
+      nextErrors.username = 'Username may only contain letters, numbers, dots, underscores, and hyphens.';
+    } else if (normalizedUsername.length < 3 || normalizedUsername.length > 50) {
+      nextErrors.username = 'Username must be between 3 and 50 characters.';
+    }
+
     if (!editingUser && userFormData.password.length < 6) {
-      alert('Password must be at least 6 characters.');
+      nextErrors.password = 'Password must be at least 6 characters.';
+    }
+
+    if (editingUser && userFormData.password && userFormData.password.length < 6) {
+      nextErrors.password = 'New password must be at least 6 characters.';
+    }
+
+    setUserFormErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setUserFormError('Please correct the highlighted fields.');
       return;
     }
 
     const payload: User = {
       id: editingUser?.id ?? `usr-${Date.now()}`,
-      name: userFormData.name.trim(),
-      username: userFormData.username.trim(),
+      name: normalizedName,
+      username: normalizedUsername,
       role: userFormData.role,
       pin: userFormData.password,
       active: editingUser?.active ?? true,
@@ -197,25 +269,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             },
     };
 
-    if (editingUser) {
-      await onEditUser(payload);
-    } else {
-      await onAddUser(payload);
-    }
+    try {
+      setIsSavingUser(true);
+      setUserFormError(null);
+      if (editingUser) {
+        await onEditUser(payload);
+        notify('User updated successfully.', 'success');
+      } else {
+        await onAddUser(payload);
+        notify('User created successfully.', 'success');
+      }
 
-    setIsUserModalOpen(false);
+      setIsUserModalOpen(false);
+    } catch (error) {
+      setUserFormError(error instanceof Error ? error.message : 'Unable to save user.');
+    } finally {
+      setIsSavingUser(false);
+    }
   };
 
   const handleConfirmResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resetModalUser || newPasswordInput.length < 6) {
-      alert('Password must be at least 6 characters.');
+    if (!resetModalUser || isResettingPassword) {
       return;
     }
 
-    await onResetUserPassword(resetModalUser.id, newPasswordInput);
-    setResetModalUser(null);
-    setNewPasswordInput('');
+    if (newPasswordInput.length < 6) {
+      setResetPasswordError('Password must be at least 6 characters.');
+      return;
+    }
+
+    try {
+      setIsResettingPassword(true);
+      setResetPasswordError(null);
+      await onResetUserPassword(resetModalUser.id, newPasswordInput);
+      notify('Password reset successfully.', 'success');
+      setResetModalUser(null);
+      setNewPasswordInput('');
+    } catch (error) {
+      setResetPasswordError(error instanceof Error ? error.message : 'Unable to reset password.');
+    } finally {
+      setIsResettingPassword(false);
+    }
   };
 
   return (
@@ -326,7 +421,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           <KeyRound className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => onToggleUserActive(user.id)}
+                          onClick={async () => {
+                            try {
+                              await onToggleUserActive(user.id);
+                              notify(
+                                user.active ? 'User deactivated successfully.' : 'User activated successfully.',
+                                'success',
+                              );
+                            } catch (error) {
+                              notify(
+                                error instanceof Error ? error.message : 'Unable to update user status.',
+                                'error',
+                              );
+                            }
+                          }}
                           className={`p-1.5 rounded-lg transition-colors ${
                             user.active ? 'text-amber-600 hover:bg-amber-50' : 'text-emerald-600 hover:bg-emerald-50'
                           }`}
@@ -336,9 +444,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         </button>
                         {users.length > 1 && (
                           <button
-                            onClick={() => {
-                              if (confirm(`Are you sure you want to delete user "${user.name}"?`)) {
-                                void onDeleteUser(user.id);
+                            onClick={async () => {
+                              const approved = await confirm({
+                                title: `Delete ${user.name}?`,
+                                message: 'This permanently deletes the user account and cannot be undone.',
+                                confirmLabel: 'Delete',
+                                tone: 'danger',
+                              });
+                              if (!approved) {
+                                return;
+                              }
+
+                              try {
+                                await onDeleteUser(user.id);
+                                notify('User deleted successfully.', 'success');
+                              } catch (error) {
+                                notify(
+                                  error instanceof Error ? error.message : 'Unable to delete user.',
+                                  'error',
+                                );
                               }
                             }}
                             className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 transition-colors"
@@ -373,15 +497,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveSystemSettings} className="space-y-5 text-xs">
+              {systemFormError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {systemFormError}
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">Store / Shop Name *</label>
                 <input
                   type="text"
                   required
                   value={systemForm.storeName}
-                  onChange={(e) => setSystemForm((prev) => ({ ...prev, storeName: e.target.value }))}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-extrabold text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => {
+                    setSystemForm((prev) => ({ ...prev, storeName: e.target.value }));
+                    setSystemErrors((current) => ({ ...current, storeName: '' }));
+                  }}
+                  maxLength={120}
+                  className={`w-full rounded-xl border bg-slate-50 p-3 text-sm font-extrabold text-slate-900 focus:outline-none focus:ring-2 ${
+                    systemErrors.storeName
+                      ? 'border-rose-300 focus:ring-rose-400'
+                      : 'border-slate-200 focus:ring-blue-500'
+                  }`}
                 />
+                <div className="flex items-center justify-between">
+                  {systemErrors.storeName ? (
+                    <p className="text-[11px] text-rose-600">{systemErrors.storeName}</p>
+                  ) : (
+                    <span />
+                  )}
+                  <p className="text-[11px] text-slate-400">{systemForm.storeName.length}/120</p>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -430,9 +576,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
               <button
                 type="submit"
+                disabled={isSavingSystem}
                 className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs shadow-md flex items-center justify-center gap-2 transition-all"
               >
-                {savedSuccess ? (
+                {isSavingSystem ? (
+                  <span>Saving Changes...</span>
+                ) : savedSuccess ? (
                   <>
                     <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
                     <span>System Branding Saved Successfully!</span>
@@ -536,15 +685,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveUser} className="space-y-4 text-xs">
+              {userFormError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {userFormError}
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">Full Name *</label>
                 <input
                   type="text"
                   required
                   value={userFormData.name}
-                  onChange={(e) => setUserFormData((prev) => ({ ...prev, name: e.target.value }))}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold"
+                  onChange={(e) => {
+                    setUserFormData((prev) => ({ ...prev, name: e.target.value }));
+                    setUserFormErrors((current) => ({ ...current, name: '' }));
+                  }}
+                  maxLength={120}
+                  className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
+                    userFormErrors.name ? 'border-rose-300' : 'border-slate-200'
+                  }`}
                 />
+                {userFormErrors.name && <p className="text-[11px] text-rose-600">{userFormErrors.name}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -554,9 +716,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     type="text"
                     required
                     value={userFormData.username}
-                    onChange={(e) => setUserFormData((prev) => ({ ...prev, username: e.target.value }))}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900 font-bold"
+                    onChange={(e) => {
+                      setUserFormData((prev) => ({ ...prev, username: e.target.value }));
+                      setUserFormErrors((current) => ({ ...current, username: '' }));
+                    }}
+                    maxLength={50}
+                    className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
+                      userFormErrors.username ? 'border-rose-300' : 'border-slate-200'
+                    }`}
                   />
+                  {userFormErrors.username && (
+                    <p className="text-[11px] text-rose-600">{userFormErrors.username}</p>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -579,22 +750,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <input
                   type="password"
                   value={userFormData.password}
-                  onChange={(e) => setUserFormData((prev) => ({ ...prev, password: e.target.value }))}
+                  onChange={(e) => {
+                    setUserFormData((prev) => ({ ...prev, password: e.target.value }));
+                    setUserFormErrors((current) => ({ ...current, password: '' }));
+                  }}
                   placeholder={editingUser ? 'Leave blank to keep current password' : 'At least 6 characters'}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900 font-bold"
+                  maxLength={72}
+                  className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
+                    userFormErrors.password ? 'border-rose-300' : 'border-slate-200'
+                  }`}
                 />
+                {userFormErrors.password && (
+                  <p className="text-[11px] text-rose-600">{userFormErrors.password}</p>
+                )}
               </div>
 
               <div className="flex space-x-3 pt-2">
                 <button
                   type="button"
                   onClick={() => setIsUserModalOpen(false)}
+                  disabled={isSavingUser}
                   className="w-1/2 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="w-1/2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold">
-                  Save User Account
+                <button
+                  type="submit"
+                  disabled={isSavingUser}
+                  className="w-1/2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold disabled:cursor-not-allowed disabled:bg-blue-300"
+                >
+                  {isSavingUser ? 'Saving...' : 'Save User Account'}
                 </button>
               </div>
             </form>
@@ -613,15 +798,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <form onSubmit={handleConfirmResetPassword} className="space-y-4 text-xs">
+              {resetPasswordError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {resetPasswordError}
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">New Password *</label>
                 <input
                   type="password"
                   required
                   value={newPasswordInput}
-                  onChange={(e) => setNewPasswordInput(e.target.value)}
+                  onChange={(e) => {
+                    setNewPasswordInput(e.target.value);
+                    setResetPasswordError(null);
+                  }}
                   placeholder="At least 6 characters"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900 font-bold"
+                  maxLength={72}
+                  className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
+                    resetPasswordError ? 'border-rose-300' : 'border-slate-200'
+                  }`}
                 />
               </div>
 
@@ -629,12 +826,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setResetModalUser(null)}
+                  disabled={isResettingPassword}
                   className="w-1/2 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="w-1/2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold">
-                  Update Password
+                <button
+                  type="submit"
+                  disabled={isResettingPassword}
+                  className="w-1/2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold disabled:cursor-not-allowed disabled:bg-blue-300"
+                >
+                  {isResettingPassword ? 'Updating...' : 'Update Password'}
                 </button>
               </div>
             </form>

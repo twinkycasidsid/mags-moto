@@ -11,6 +11,8 @@ import { ExpensesView } from './components/ExpensesView';
 import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { LoginPage } from './components/LoginPage';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { FeedbackProvider } from './components/FeedbackProvider';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
 import { useAppData } from './hooks/useAppData';
 import { supabase } from './lib/supabase';
@@ -181,7 +183,6 @@ const AppShell = () => {
       name: product.name,
       description: product.description,
       categoryId: product.categoryId,
-      supplierId: product.supplierId,
       unit: product.unit,
       costPrice: product.costPrice,
       totalPurchaseCost,
@@ -227,7 +228,6 @@ const AppShell = () => {
           <ProductManagementView
             products={snapshot.products}
             categories={snapshot.categories}
-            suppliers={snapshot.suppliers}
             settings={settings}
             currentUser={currentUser}
             onSaveProduct={handleSaveProduct}
@@ -253,7 +253,6 @@ const AppShell = () => {
           <InventoryView
             products={snapshot.products}
             categories={snapshot.categories}
-            suppliers={snapshot.suppliers}
             inventoryMovements={snapshot.inventoryMovements}
             currentUser={currentUser}
             settings={settings}
@@ -378,9 +377,13 @@ const AppShell = () => {
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <AppShell />
-      </AuthProvider>
+      <AppErrorBoundary>
+        <FeedbackProvider>
+          <AuthProvider>
+            <AppShell />
+          </AuthProvider>
+        </FeedbackProvider>
+      </AppErrorBoundary>
     </BrowserRouter>
   );
 }

@@ -59,6 +59,20 @@ const insertAuditLog = async (
 
 const getUserId = (req: AuthenticatedRequestLike) => z.string().uuid().parse(req.query?.id);
 
+const getActiveAdminCount = async () => {
+  const { count, error } = await supabaseAdmin
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('role', 'admin')
+    .eq('active', true);
+
+  if (error) {
+    throw error;
+  }
+
+  return count ?? 0;
+};
+
 const handleUpdateUser = async (req: AuthenticatedRequestLike, res: ApiResponseLike) => {
   try {
     const actor = await requireAdmin(req);
@@ -88,6 +102,17 @@ const handleUpdateUser = async (req: AuthenticatedRequestLike, res: ApiResponseL
 
     if (usernameConflict) {
       return sendError(res, 409, 'Username already exists.');
+    }
+
+    if (
+      existingUser.role === 'admin' &&
+      payload.role !== 'admin' &&
+      existingUser.active
+    ) {
+      const activeAdminCount = await getActiveAdminCount();
+      if (activeAdminCount <= 1) {
+        return sendError(res, 400, 'At least one active administrator account is required.');
+      }
     }
 
     const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
@@ -156,12 +181,19 @@ const handleDeleteUser = async (req: AuthenticatedRequestLike, res: ApiResponseL
 
     const { data: existingUser, error: existingUserError } = await supabaseAdmin
       .from('profiles')
-      .select('name')
+      .select('name, role, active')
       .eq('id', userId)
       .single();
 
     if (existingUserError || !existingUser) {
       return sendError(res, 404, 'User not found.');
+    }
+
+    if (existingUser.role === 'admin' && existingUser.active) {
+      const activeAdminCount = await getActiveAdminCount();
+      if (activeAdminCount <= 1) {
+        return sendError(res, 400, 'At least one active administrator account is required.');
+      }
     }
 
     const { error: deleteAuthError } = await supabaseAdmin.auth.admin.deleteUser(userId);

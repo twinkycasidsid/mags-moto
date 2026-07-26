@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Transaction, User, StoreSettings } from '../types';
+import { useFeedback } from './FeedbackProvider';
 import { PaginationControls } from './PaginationControls';
 import { Search, Receipt, AlertTriangle, Eye, X } from 'lucide-react';
 
@@ -16,12 +17,16 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
   settings,
   onVoidTransaction,
 }) => {
+  const { notify } = useFeedback();
   const [search, setSearch] = useState('');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [txToVoid, setTxToVoid] = useState<Transaction | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [voidFieldError, setVoidFieldError] = useState<string | null>(null);
+  const [voidFormError, setVoidFormError] = useState<string | null>(null);
+  const [isVoiding, setIsVoiding] = useState(false);
 
   const filteredTransactions = transactions.filter(
     (t) =>
@@ -32,28 +37,45 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
 
   const openVoidModal = (tx: Transaction) => {
     if (currentUser.role !== 'admin') {
-      alert('Only Store Owner / Admin can void completed sales.');
+      notify('Only administrators can void completed sales.', 'error');
       return;
     }
     setTxToVoid(tx);
     setVoidReason('');
+    setVoidFieldError(null);
+    setVoidFormError(null);
     setIsVoidModalOpen(true);
   };
 
   const handleConfirmVoid = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!txToVoid || !voidReason) {
-      alert('Please provide a mandatory reason for voiding this receipt.');
+    if (!txToVoid || isVoiding) {
+      return;
+    }
+
+    const normalizedReason = voidReason.trim();
+    if (!normalizedReason) {
+      setVoidFieldError('Void reason is required.');
+      setVoidFormError('Please provide a reason before voiding this receipt.');
+      return;
+    }
+
+    if (normalizedReason.length > 240) {
+      setVoidFieldError('Void reason must be 240 characters or fewer.');
+      setVoidFormError('Please correct the highlighted field.');
       return;
     }
 
     try {
-      await onVoidTransaction(txToVoid.id, voidReason);
-      alert(`Receipt #${txToVoid.receiptNumber} voided. Restored product stock automatically.`);
+      setIsVoiding(true);
+      await onVoidTransaction(txToVoid.id, normalizedReason);
+      notify(`Receipt #${txToVoid.receiptNumber} voided successfully.`, 'success');
       setIsVoidModalOpen(false);
       setTxToVoid(null);
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to void transaction.');
+      setVoidFormError(error instanceof Error ? error.message : 'Unable to void transaction.');
+    } finally {
+      setIsVoiding(false);
     }
   };
 
@@ -217,6 +239,12 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
             </div>
 
             <form onSubmit={handleConfirmVoid} className="space-y-4 text-xs">
+              {voidFormError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {voidFormError}
+                </div>
+              )}
+
               <p className="text-slate-600">
                 Voiding a transaction will restore item stock levels back to inventory and log an audit entry.
               </p>
@@ -227,25 +255,45 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
                   type="text"
                   required
                   value={voidReason}
-                  onChange={(e) => setVoidReason(e.target.value)}
+                  onChange={(e) => {
+                    setVoidReason(e.target.value);
+                    setVoidFieldError(null);
+                  }}
+                  maxLength={240}
                   placeholder="e.g. Cashier error, duplicate ring-up, customer changed mind"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold"
+                  className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
+                    voidFieldError ? 'border-rose-300' : 'border-slate-200'
+                  }`}
                 />
+                <div className="flex items-center justify-between">
+                  {voidFieldError ? (
+                    <p className="text-[11px] text-rose-600">{voidFieldError}</p>
+                  ) : (
+                    <span />
+                  )}
+                  <p className="text-[11px] text-slate-400">{voidReason.length}/240</p>
+                </div>
               </div>
 
               <div className="flex space-x-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsVoidModalOpen(false)}
+                  onClick={() => {
+                    setIsVoidModalOpen(false);
+                    setVoidFieldError(null);
+                    setVoidFormError(null);
+                  }}
+                  disabled={isVoiding}
                   className="w-1/2 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                  disabled={isVoiding}
+                  className="w-1/2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold disabled:cursor-not-allowed disabled:bg-rose-300"
                 >
-                  Confirm Void
+                  {isVoiding ? 'Voiding...' : 'Confirm Void'}
                 </button>
               </div>
             </form>

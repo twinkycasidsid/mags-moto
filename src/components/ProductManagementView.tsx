@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Category, Product, StoreSettings, Supplier, User } from '../types';
+import { Category, Product, StoreSettings, User } from '../types';
+import { useFeedback } from './FeedbackProvider';
 import { PaginationControls } from './PaginationControls';
 import {
   Archive,
@@ -17,7 +18,6 @@ import {
 interface ProductManagementViewProps {
   products: Product[];
   categories: Category[];
-  suppliers: Supplier[];
   settings: StoreSettings;
   currentUser: User;
   onSaveProduct: (product: Product, totalPurchaseCost?: number) => Promise<void> | void;
@@ -32,7 +32,6 @@ const calculateLowStockLevel = (stock: number) => Math.max(1, Math.ceil(Math.max
 export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   products,
   categories,
-  suppliers,
   settings,
   currentUser,
   onSaveProduct,
@@ -41,6 +40,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   isAddModalOpen,
   setIsAddModalOpen,
 }) => {
+  const { confirm, notify } = useFeedback();
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<'active' | 'archived' | 'all'>('active');
@@ -51,6 +51,8 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
   const [initialStockQuantity, setInitialStockQuantity] = useState<number>(1);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [busyProductId, setBusyProductId] = useState<string | null>(null);
   const activeCategories = categories.filter((category) => category.active !== false);
 
   const [formData, setFormData] = useState<Partial<Product>>({
@@ -113,23 +115,36 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) {
+      return;
+    }
     const nextErrors: Record<string, string> = {};
     setFormError(null);
+    const normalizedName = formData.name?.trim().replace(/\s+/g, ' ') ?? '';
+    const normalizedDescription = formData.description?.trim() ?? '';
 
-    if (!formData.name?.trim()) {
+    if (!normalizedName) {
       nextErrors.name = 'Product name is required.';
+    } else if (normalizedName.length > 160) {
+      nextErrors.name = 'Product name must be 160 characters or fewer.';
     }
 
     if (!formData.categoryId) {
-      nextErrors.categoryId = 'Category is required.';
+      nextErrors.categoryId = 'Please select a category.';
     }
 
     if (!formData.unit?.trim()) {
       nextErrors.unit = 'Unit of measurement is required.';
     }
 
+    if (normalizedDescription.length > 500) {
+      nextErrors.description = 'Description must be 500 characters or fewer.';
+    }
+
     if ((Number(formData.sellingPrice) || 0) < 0) {
       nextErrors.sellingPrice = 'Selling price cannot be negative.';
+    } else if ((Number(formData.sellingPrice) || 0) === 0) {
+      nextErrors.sellingPrice = 'Selling price must be greater than zero.';
     }
 
     if (!editingProduct) {
@@ -142,6 +157,15 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
       }
     }
 
+    const duplicateProduct = products.find(
+      (product) =>
+        product.id !== editingProduct?.id &&
+        product.name.trim().toLowerCase() === normalizedName.toLowerCase(),
+    );
+    if (duplicateProduct) {
+      nextErrors.name = 'A product with this name already exists.';
+    }
+
     setFieldErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       setFormError('Please correct the highlighted fields.');
@@ -151,10 +175,9 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
     const productToSave: Product = {
       id: editingProduct ? editingProduct.id : `prod-${Date.now()}`,
       sku: editingProduct?.sku || formData.sku || '',
-      name: formData.name,
-      description: formData.description || '',
+      name: normalizedName,
+      description: normalizedDescription,
       categoryId: formData.categoryId!,
-      supplierId: editingProduct?.supplierId || formData.supplierId || undefined,
       unit: formData.unit || 'pc',
       costPrice: editingProduct ? Number(formData.costPrice) || 0 : calculatedUnitCost,
       sellingPrice: Number(formData.sellingPrice) || 0,
@@ -166,12 +189,16 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
     };
 
     try {
+      setIsSubmitting(true);
       await onSaveProduct(productToSave, editingProduct ? undefined : totalPurchaseCost);
+      notify(editingProduct ? 'Product updated successfully.' : 'Product created successfully.', 'success');
       setFormError(null);
       setFieldErrors({});
       setIsAddModalOpen(false);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Unable to save product.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -377,15 +404,26 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                             <button
                               onClick={async () => {
                                 try {
+                                  setBusyProductId(product.id);
                                   await onToggleArchiveProduct(product.id);
+                                  notify(
+                                    product.status === 'active'
+                                      ? 'Product archived successfully.'
+                                      : 'Product restored successfully.',
+                                    'success',
+                                  );
                                 } catch (error) {
-                                  alert(
+                                  notify(
                                     error instanceof Error
                                       ? error.message
                                       : 'Unable to update product status.',
+                                    'error',
                                   );
+                                } finally {
+                                  setBusyProductId(null);
                                 }
                               }}
+                              disabled={busyProductId === product.id}
                               className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600"
                               title={product.status === 'active' ? 'Archive Product' : 'Restore Product'}
                             >
@@ -397,21 +435,31 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                             </button>
                             <button
                               onClick={async () => {
-                                const confirmed = window.confirm(
-                                  `Delete "${product.name}"? This only works if the product has never been used in sales or inventory transactions.`,
-                                );
+                                const confirmed = await confirm({
+                                  title: `Delete ${product.name}?`,
+                                  message:
+                                    'This permanently removes the product. Deletion only succeeds if it has no sales or inventory history.',
+                                  confirmLabel: 'Delete',
+                                  tone: 'danger',
+                                });
                                 if (!confirmed) {
                                   return;
                                 }
 
                                 try {
+                                  setBusyProductId(product.id);
                                   await onDeleteProduct(product.id);
+                                  notify('Product deleted successfully.', 'success');
                                 } catch (error) {
-                                  alert(
+                                  notify(
                                     error instanceof Error ? error.message : 'Unable to delete product.',
+                                    'error',
                                   );
+                                } finally {
+                                  setBusyProductId(null);
                                 }
                               }}
+                              disabled={busyProductId === product.id}
                               className="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-700"
                               title="Delete Product"
                             >
@@ -470,6 +518,7 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                     setFormData({ ...formData, name: e.target.value });
                     setFieldErrors((current) => ({ ...current, name: '' }));
                   }}
+                  maxLength={160}
                   placeholder="e.g. Premium Stainless Water Bottle"
                   className={`w-full rounded-xl border bg-slate-50 p-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     fieldErrors.name ? 'border-rose-300 focus:ring-rose-400' : 'border-slate-200'
@@ -523,6 +572,30 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                     <option value="box">Box</option>
                   </select>
                   {fieldErrors.unit && <p className="text-[11px] text-rose-600">{fieldErrors.unit}</p>}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">Description</label>
+                <textarea
+                  value={formData.description || ''}
+                  onChange={(e) => {
+                    setFormData({ ...formData, description: e.target.value });
+                    setFieldErrors((current) => ({ ...current, description: '' }));
+                  }}
+                  maxLength={500}
+                  placeholder="Optional product description"
+                  className={`h-24 w-full rounded-xl border bg-slate-50 p-2.5 text-sm text-slate-900 ${
+                    fieldErrors.description ? 'border-rose-300' : 'border-slate-200'
+                  }`}
+                />
+                <div className="flex items-center justify-between">
+                  {fieldErrors.description ? (
+                    <p className="text-[11px] text-rose-600">{fieldErrors.description}</p>
+                  ) : (
+                    <span />
+                  )}
+                  <p className="text-[11px] text-slate-400">{(formData.description || '').length}/500</p>
                 </div>
               </div>
 
@@ -632,9 +705,10 @@ export const ProductManagementView: React.FC<ProductManagementViewProps> = ({
                 </button>
                 <button
                   type="submit"
+                  disabled={isSubmitting}
                   className="w-1/2 rounded-xl bg-blue-600 py-2.5 font-bold text-white shadow-md hover:bg-blue-500"
                 >
-                  Save Product
+                  {isSubmitting ? 'Saving...' : 'Save Product'}
                 </button>
               </div>
             </form>

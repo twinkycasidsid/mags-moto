@@ -9,14 +9,19 @@ export const apiFetch = async <T>(
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const requestUrl = normalizedBaseUrl ? `${normalizedBaseUrl}${normalizedPath}` : normalizedPath;
 
-  const response = await fetch(requestUrl, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-      ...(init?.headers ?? {}),
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(requestUrl, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new Error('Unable to reach the server. Check your connection and try again.');
+  }
 
   if (!response.ok) {
     const responseText = await response.text().catch(() => '');
@@ -29,6 +34,12 @@ export const apiFetch = async <T>(
       } catch {
         message = responseText;
       }
+    } else if (response.status === 401) {
+      message = 'Your session has expired. Please sign in again.';
+    } else if (response.status === 403) {
+      message = 'You do not have permission to perform this action.';
+    } else if (response.status >= 500) {
+      message = 'The server encountered an error. Please try again.';
     }
 
     throw new Error(message);

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Product, Category, CartItem, PaymentMethod, Transaction, User, StoreSettings, SaleCheckoutInput } from '../types';
+import { useFeedback } from './FeedbackProvider';
 import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, DollarSign, Check, X } from 'lucide-react';
 
 interface POSViewProps {
@@ -17,6 +18,7 @@ export const POSView: React.FC<POSViewProps> = ({
   settings,
   onCompleteTransaction,
 }) => {
+  const { confirm, notify } = useFeedback();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -27,6 +29,8 @@ export const POSView: React.FC<POSViewProps> = ({
   const [amountReceived, setAmountReceived] = useState<string>('');
   const [discountAmount, setDiscountAmount] = useState<string>('');
   const [isProcessingSale, setIsProcessingSale] = useState(false);
+  const [checkoutErrors, setCheckoutErrors] = useState<Record<string, string>>({});
+  const [checkoutFormError, setCheckoutFormError] = useState<string | null>(null);
   
   // Completed Receipt Modal state
   const [lastCompletedTx, setLastCompletedTx] = useState<Transaction | null>(null);
@@ -45,7 +49,7 @@ export const POSView: React.FC<POSViewProps> = ({
   // Cart operations
   const addToCart = (product: Product) => {
     if (product.currentStock <= 0 && !settings.allowNegativeStock) {
-      alert(`Cannot add "${product.name}" - Item is Out of Stock!`);
+      notify(`Cannot add "${product.name}" because it is out of stock.`, 'error');
       return;
     }
 
@@ -53,7 +57,7 @@ export const POSView: React.FC<POSViewProps> = ({
       const existing = prevCart.find((item) => item.product.id === product.id);
       if (existing) {
         if (existing.quantity >= product.currentStock && !settings.allowNegativeStock) {
-          alert(`Maximum available stock (${product.currentStock}) reached for "${product.name}".`);
+          notify(`Only ${product.currentStock} item(s) are available for "${product.name}".`, 'error');
           return prevCart;
         }
         return prevCart.map((item) =>
@@ -72,7 +76,7 @@ export const POSView: React.FC<POSViewProps> = ({
             const newQty = item.quantity + delta;
             if (newQty <= 0) return null;
             if (newQty > item.product.currentStock && !settings.allowNegativeStock) {
-              alert(`Only ${item.product.currentStock} items available in stock.`);
+              notify(`Only ${item.product.currentStock} item(s) are available in stock.`, 'error');
               return item;
             }
             return { ...item, quantity: newQty };
@@ -101,6 +105,8 @@ export const POSView: React.FC<POSViewProps> = ({
     setAmountReceived(subtotal.toFixed(2));
     setDiscountAmount('');
     setPaymentMethod('cash');
+    setCheckoutErrors({});
+    setCheckoutFormError(null);
     setIsCheckoutOpen(true);
   };
 
@@ -112,12 +118,34 @@ export const POSView: React.FC<POSViewProps> = ({
     const receivedNum = parseFloat(amountReceived) || 0;
     const discountVal = Math.max(0, parseFloat(discountAmount) || 0);
     const netTotal = Math.max(0, subtotal - discountVal);
+    const nextErrors: Record<string, string> = {};
 
-    if (receivedNum < netTotal) {
-      alert(`Amount received (${settings.currencySymbol}${receivedNum.toFixed(2)}) is less than net total bill (${settings.currencySymbol}${netTotal.toFixed(2)}).`);
+    if (cart.length === 0) {
+      setCheckoutFormError('Cart is empty.');
       return;
     }
 
+    if (discountAmount && Number.isNaN(parseFloat(discountAmount))) {
+      nextErrors.discountAmount = 'Discount amount must be a valid number.';
+    } else if (discountVal >= subtotal && subtotal > 0) {
+      nextErrors.discountAmount = 'Discount must be less than the subtotal.';
+    }
+
+    if (!amountReceived.trim()) {
+      nextErrors.amountReceived = 'Amount received is required.';
+    } else if (Number.isNaN(parseFloat(amountReceived))) {
+      nextErrors.amountReceived = 'Amount received must be a valid number.';
+    } else if (receivedNum < netTotal) {
+      nextErrors.amountReceived = `Amount received must be at least ${settings.currencySymbol}${netTotal.toFixed(2)}.`;
+    }
+
+    setCheckoutErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setCheckoutFormError('Please correct the highlighted fields.');
+      return;
+    }
+
+    setCheckoutFormError(null);
     setIsProcessingSale(true);
     try {
       const transaction = await onCompleteTransaction({
@@ -133,8 +161,9 @@ export const POSView: React.FC<POSViewProps> = ({
       setLastCompletedTx(transaction);
       setIsCheckoutOpen(false);
       clearCart();
+      notify('Sale completed successfully.', 'success');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to complete sale.');
+      setCheckoutFormError(error instanceof Error ? error.message : 'Unable to complete sale.');
     } finally {
       setIsProcessingSale(false);
     }
@@ -252,7 +281,18 @@ export const POSView: React.FC<POSViewProps> = ({
           </div>
           {cart.length > 0 && (
             <button
-              onClick={clearCart}
+              onClick={async () => {
+                const approved = await confirm({
+                  title: 'Clear current cart?',
+                  message: 'This removes all items from the current sale.',
+                  confirmLabel: 'Clear Cart',
+                  tone: 'danger',
+                });
+                if (approved) {
+                  clearCart();
+                  notify('Cart cleared.', 'info');
+                }
+              }}
               className="text-xs text-rose-600 hover:text-rose-700 font-semibold flex items-center gap-1"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -351,6 +391,12 @@ export const POSView: React.FC<POSViewProps> = ({
             </div>
 
             <div className="space-y-4">
+              {checkoutFormError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {checkoutFormError}
+                </div>
+              )}
+
               <div className="p-4 rounded-xl bg-blue-50 border border-blue-100 text-center space-y-1">
                 <p className="text-xs text-blue-800 font-medium">Subtotal Due</p>
                 <p className="text-3xl font-black text-blue-700">
@@ -397,10 +443,21 @@ export const POSView: React.FC<POSViewProps> = ({
                     type="number"
                     step="0.01"
                     value={amountReceived}
-                    onChange={(e) => setAmountReceived(e.target.value)}
-                    className="w-full pl-8 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    min="0"
+                    onChange={(e) => {
+                      setAmountReceived(e.target.value);
+                      setCheckoutErrors((current) => ({ ...current, amountReceived: '' }));
+                    }}
+                    className={`w-full rounded-xl border bg-slate-50 py-2.5 pl-8 pr-4 text-lg font-bold text-slate-900 focus:outline-none focus:ring-2 ${
+                      checkoutErrors.amountReceived
+                        ? 'border-rose-300 focus:ring-rose-400'
+                        : 'border-slate-200 focus:ring-blue-500'
+                    }`}
                   />
                 </div>
+                {checkoutErrors.amountReceived && (
+                  <p className="text-[11px] text-rose-600">{checkoutErrors.amountReceived}</p>
+                )}
               </div>
 
               {/* Optional Discount Field below Amount Received */}
@@ -416,10 +473,20 @@ export const POSView: React.FC<POSViewProps> = ({
                     min="0"
                     placeholder="0.00"
                     value={discountAmount}
-                    onChange={(e) => setDiscountAmount(e.target.value)}
-                    className="w-full pl-8 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onChange={(e) => {
+                      setDiscountAmount(e.target.value);
+                      setCheckoutErrors((current) => ({ ...current, discountAmount: '' }));
+                    }}
+                    className={`w-full rounded-xl border bg-slate-50 py-2 pl-8 pr-4 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 ${
+                      checkoutErrors.discountAmount
+                        ? 'border-rose-300 focus:ring-rose-400'
+                        : 'border-slate-200 focus:ring-blue-500'
+                    }`}
                   />
                 </div>
+                {checkoutErrors.discountAmount && (
+                  <p className="text-[11px] text-rose-600">{checkoutErrors.discountAmount}</p>
+                )}
               </div>
 
               {/* Change Calculation */}

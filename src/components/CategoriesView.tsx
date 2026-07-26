@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { Category, User } from '../types';
+import { useFeedback } from './FeedbackProvider';
 import { PaginationControls } from './PaginationControls';
 import { Edit2, FolderTree, Plus, Power, RotateCcw, Trash2, X } from 'lucide-react';
 
@@ -20,11 +21,16 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
   onSetCategoryActive,
   onDeleteCategory,
 }) => {
+  const { confirm, notify } = useFeedback();
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [busyCategoryId, setBusyCategoryId] = useState<string | null>(null);
 
   const sortedCategories = useMemo(
     () => [...categories].sort((a, b) => a.name.localeCompare(b.name)),
@@ -39,6 +45,8 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
     setEditingCategory(null);
     setName('');
     setDescription('');
+    setFormError(null);
+    setFieldErrors({});
   };
 
   const openAddModal = () => {
@@ -60,20 +68,45 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
-      alert('Category name is required.');
+    if (isSubmitting) {
+      return;
+    }
+
+    const normalizedName = name.trim().replace(/\s+/g, ' ');
+    const nextErrors: Record<string, string> = {};
+    if (!normalizedName) {
+      nextErrors.name = 'Category name is required.';
+    } else if (normalizedName.length > 120) {
+      nextErrors.name = 'Category name must be 120 characters or fewer.';
+    }
+
+    if (description.trim().length > 300) {
+      nextErrors.description = 'Description must be 300 characters or fewer.';
+    }
+
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setFormError('Please correct the highlighted fields.');
       return;
     }
 
     try {
+      setIsSubmitting(true);
       if (editingCategory) {
-        await onUpdateCategory(editingCategory.id, { name, description });
+        await onUpdateCategory(editingCategory.id, {
+          name: normalizedName,
+          description: description.trim(),
+        });
+        notify('Category updated successfully.', 'success');
       } else {
-        await onCreateCategory({ name, description });
+        await onCreateCategory({ name: normalizedName, description: description.trim() });
+        notify('Category created successfully.', 'success');
       }
       closeModal();
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to save category.');
+      setFormError(error instanceof Error ? error.message : 'Unable to save category.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -153,19 +186,31 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                       {category.active ? (
                         <button
                           onClick={async () => {
-                            if (!confirm(`Deactivate category "${category.name}"?`)) {
+                            const approved = await confirm({
+                              title: `Deactivate ${category.name}?`,
+                              message:
+                                'Inactive categories are hidden from product creation and cashier selection, but existing product records remain intact.',
+                              confirmLabel: 'Deactivate',
+                            });
+                            if (!approved) {
                               return;
                             }
                             try {
+                              setBusyCategoryId(category.id);
                               await onSetCategoryActive(category.id, false);
+                              notify('Category deactivated successfully.', 'success');
                             } catch (error) {
-                              alert(
+                              notify(
                                 error instanceof Error
                                   ? error.message
                                   : 'Unable to deactivate category.',
+                                'error',
                               );
+                            } finally {
+                              setBusyCategoryId(null);
                             }
                           }}
+                          disabled={busyCategoryId === category.id}
                           className="rounded-lg p-1.5 text-amber-600 transition-colors hover:bg-amber-50"
                           title="Deactivate Category"
                         >
@@ -174,19 +219,30 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                       ) : (
                         <button
                           onClick={async () => {
-                            if (!confirm(`Reactivate category "${category.name}"?`)) {
+                            const approved = await confirm({
+                              title: `Reactivate ${category.name}?`,
+                              message: 'This category will become available again across the system.',
+                              confirmLabel: 'Reactivate',
+                            });
+                            if (!approved) {
                               return;
                             }
                             try {
+                              setBusyCategoryId(category.id);
                               await onSetCategoryActive(category.id, true);
+                              notify('Category reactivated successfully.', 'success');
                             } catch (error) {
-                              alert(
+                              notify(
                                 error instanceof Error
                                   ? error.message
                                   : 'Unable to reactivate category.',
+                                'error',
                               );
+                            } finally {
+                              setBusyCategoryId(null);
                             }
                           }}
+                          disabled={busyCategoryId === category.id}
                           className="rounded-lg p-1.5 text-blue-600 transition-colors hover:bg-blue-50"
                           title="Reactivate Category"
                         >
@@ -196,21 +252,30 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
 
                       <button
                         onClick={async () => {
-                          if (
-                            !confirm(
-                              `Delete category "${category.name}"? This is only allowed when no products are assigned.`,
-                            )
-                          ) {
+                          const approved = await confirm({
+                            title: `Delete ${category.name}?`,
+                            message:
+                              'This permanently removes the category. Deletion only succeeds when no products are assigned.',
+                            confirmLabel: 'Delete',
+                            tone: 'danger',
+                          });
+                          if (!approved) {
                             return;
                           }
                           try {
+                            setBusyCategoryId(category.id);
                             await onDeleteCategory(category.id);
+                            notify('Category deleted successfully.', 'success');
                           } catch (error) {
-                            alert(
+                            notify(
                               error instanceof Error ? error.message : 'Unable to delete category.',
+                              'error',
                             );
+                          } finally {
+                            setBusyCategoryId(null);
                           }
                         }}
+                        disabled={busyCategoryId === category.id}
                         className="rounded-lg p-1.5 text-rose-500 transition-colors hover:bg-rose-50"
                         title="Delete Category"
                       >
@@ -243,26 +308,53 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4 pt-4 text-xs">
+              {formError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {formError}
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">Category Name *</label>
                 <input
                   type="text"
                   required
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setFieldErrors((current) => ({ ...current, name: '' }));
+                  }}
                   placeholder="e.g. Household Essentials"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-bold text-slate-900"
+                  maxLength={120}
+                  className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
+                    fieldErrors.name ? 'border-rose-300' : 'border-slate-200'
+                  }`}
                 />
+                {fieldErrors.name && <p className="text-[11px] text-rose-600">{fieldErrors.name}</p>}
               </div>
 
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">Description</label>
                 <textarea
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => {
+                    setDescription(e.target.value);
+                    setFieldErrors((current) => ({ ...current, description: '' }));
+                  }}
                   placeholder="Optional category description"
-                  className="h-24 w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-slate-900"
+                  maxLength={300}
+                  className={`h-24 w-full rounded-xl border bg-slate-50 p-2.5 text-slate-900 ${
+                    fieldErrors.description ? 'border-rose-300' : 'border-slate-200'
+                  }`}
                 />
+                <div className="flex items-center justify-between">
+                  {fieldErrors.description ? (
+                    <p className="text-[11px] text-rose-600">{fieldErrors.description}</p>
+                  ) : (
+                    <span />
+                  )}
+                  <p className="text-[11px] text-slate-400">{description.length}/300</p>
+                </div>
               </div>
 
               <div className="flex gap-3 border-t border-slate-100 pt-3">
@@ -275,9 +367,14 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                 </button>
                 <button
                   type="submit"
+                  disabled={isSubmitting}
                   className="w-1/2 rounded-xl bg-blue-600 py-2.5 font-bold text-white shadow-md hover:bg-blue-500"
                 >
-                  {editingCategory ? 'Save Category' : 'Add Category'}
+                  {isSubmitting
+                    ? 'Saving...'
+                    : editingCategory
+                      ? 'Save Category'
+                      : 'Add Category'}
                 </button>
               </div>
             </form>

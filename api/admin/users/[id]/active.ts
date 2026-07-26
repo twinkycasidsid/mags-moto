@@ -21,6 +21,20 @@ const insertAuditLog = async (
   }
 };
 
+const getActiveAdminCount = async () => {
+  const { count, error } = await supabaseAdmin
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('role', 'admin')
+    .eq('active', true);
+
+  if (error) {
+    throw error;
+  }
+
+  return count ?? 0;
+};
+
 export default async function handler(req: AuthenticatedRequestLike, res: ApiResponseLike) {
   if (handleOptions(req, res, ['PATCH'])) {
     return;
@@ -45,6 +59,31 @@ export default async function handler(req: AuthenticatedRequestLike, res: ApiRes
 
     if (existingUserError || !existingUser) {
       return sendError(res, 404, 'User not found.');
+    }
+
+    if (actor.id === userId && !payload.active) {
+      return sendError(res, 400, 'You cannot deactivate your own account.');
+    }
+
+    const { data: existingProfileDetails, error: existingProfileDetailsError } = await supabaseAdmin
+      .from('profiles')
+      .select('role, active')
+      .eq('id', userId)
+      .single();
+
+    if (existingProfileDetailsError || !existingProfileDetails) {
+      return sendError(res, 404, 'User not found.');
+    }
+
+    if (
+      existingProfileDetails.role === 'admin' &&
+      existingProfileDetails.active &&
+      !payload.active
+    ) {
+      const activeAdminCount = await getActiveAdminCount();
+      if (activeAdminCount <= 1) {
+        return sendError(res, 400, 'At least one active administrator account is required.');
+      }
     }
 
     const { error } = await supabaseAdmin

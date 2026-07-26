@@ -6,7 +6,6 @@ import {
   StockAdjustment,
   StockReceivingRecord,
   StoreSettings,
-  Supplier,
   User,
 } from '../types';
 import {
@@ -17,11 +16,11 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react';
+import { useFeedback } from './FeedbackProvider';
 
 interface InventoryViewProps {
   products: Product[];
   categories: Category[];
-  suppliers: Supplier[];
   inventoryMovements: InventoryMovement[];
   currentUser: User;
   settings: StoreSettings;
@@ -53,13 +52,13 @@ const formatAdjustmentReason = (reason: StockAdjustment['reason']) =>
 export const InventoryView: React.FC<InventoryViewProps> = ({
   products,
   categories,
-  suppliers,
   inventoryMovements,
   currentUser,
   settings,
   onStockAdjustment,
   onReceiveStock,
 }) => {
+  const { notify } = useFeedback();
   const [search, setSearch] = useState('');
   const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const [selectedProductForAdd, setSelectedProductForAdd] = useState<Product | null>(null);
@@ -68,14 +67,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   const [quantityReceived, setQuantityReceived] = useState(1);
   const [totalPurchaseCost, setTotalPurchaseCost] = useState(0);
-  const [supplierId, setSupplierId] = useState('');
   const [receivingNotes, setReceivingNotes] = useState('');
+  const [stockInErrors, setStockInErrors] = useState<Record<string, string>>({});
+  const [stockInFormError, setStockInFormError] = useState<string | null>(null);
+  const [isSubmittingStockIn, setIsSubmittingStockIn] = useState(false);
 
   const [adjustmentType, setAdjustmentType] = useState<'increase' | 'decrease'>('decrease');
   const [adjustmentQuantity, setAdjustmentQuantity] = useState(1);
   const [adjustmentReason, setAdjustmentReason] =
     useState<StockAdjustment['reason']>('damaged');
   const [adjustmentNotes, setAdjustmentNotes] = useState('');
+  const [adjustmentErrors, setAdjustmentErrors] = useState<Record<string, string>>({});
+  const [adjustmentFormError, setAdjustmentFormError] = useState<string | null>(null);
+  const [isSubmittingAdjustment, setIsSubmittingAdjustment] = useState(false);
 
   const [historyTypeFilter, setHistoryTypeFilter] = useState<'all' | InventoryMovement['movementType']>('all');
   const [historyStartDate, setHistoryStartDate] = useState('');
@@ -153,8 +157,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setSelectedProductForAdd(product);
     setQuantityReceived(1);
     setTotalPurchaseCost(0);
-    setSupplierId('');
     setReceivingNotes('');
+    setStockInErrors({});
+    setStockInFormError(null);
   };
 
   const resetAdjustmentForm = (product: Product) => {
@@ -163,35 +168,45 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setAdjustmentQuantity(1);
     setAdjustmentReason('damaged');
     setAdjustmentNotes('');
+    setAdjustmentErrors({});
+    setAdjustmentFormError(null);
   };
 
   const handleSaveStockIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProductForAdd) {
+    if (!selectedProductForAdd || isSubmittingStockIn) {
       return;
     }
 
+    const nextErrors: Record<string, string> = {};
     if (quantityReceived <= 0) {
-      alert('Quantity received must be greater than zero.');
-      return;
+      nextErrors.quantityReceived = 'Quantity received must be greater than zero.';
     }
 
     if (totalPurchaseCost <= 0) {
-      alert('Total purchase cost must be greater than zero.');
+      nextErrors.totalPurchaseCost = 'Total purchase cost must be greater than zero.';
+    }
+
+    if (receivingNotes.trim().length > 300) {
+      nextErrors.notes = 'Notes must be 300 characters or fewer.';
+    }
+
+    setStockInErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setStockInFormError('Please correct the highlighted fields.');
       return;
     }
 
     try {
+      setIsSubmittingStockIn(true);
       await onReceiveStock({
         id: `rec-${Date.now()}`,
         referenceNumber: '',
-        supplierId: supplierId || undefined,
-        supplierName: suppliers.find((supplier) => supplier.id === supplierId)?.name,
         deliveryDate: '',
         totalAmount: totalPurchaseCost,
         recordedBy: currentUser.name,
         timestamp: new Date().toISOString(),
-        notes: receivingNotes,
+        notes: receivingNotes.trim(),
         items: [
           {
             productId: selectedProductForAdd.id,
@@ -202,34 +217,46 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           },
         ],
       });
+      notify('Stock added successfully.', 'success');
       setSelectedProductForAdd(null);
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to add stock.');
+      setStockInFormError(error instanceof Error ? error.message : 'Unable to add stock.');
+    } finally {
+      setIsSubmittingStockIn(false);
     }
   };
 
   const handleSaveAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProductForAdjust) {
+    if (!selectedProductForAdjust || isSubmittingAdjustment) {
       return;
     }
 
+    const nextErrors: Record<string, string> = {};
     if (adjustmentQuantity <= 0) {
-      alert('Quantity must be greater than zero.');
-      return;
+      nextErrors.quantity = 'Quantity must be greater than zero.';
     }
 
     if (!adjustmentReason) {
-      alert('Reason is required.');
-      return;
+      nextErrors.reason = 'Reason is required.';
     }
 
     if (newStockAfterAdjustment < 0) {
-      alert('Cannot reduce stock below zero.');
+      nextErrors.quantity = 'This adjustment would make stock negative.';
+    }
+
+    if (adjustmentNotes.trim().length > 300) {
+      nextErrors.notes = 'Notes must be 300 characters or fewer.';
+    }
+
+    setAdjustmentErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setAdjustmentFormError('Please correct the highlighted fields.');
       return;
     }
 
     try {
+      setIsSubmittingAdjustment(true);
       await onStockAdjustment({
         id: `adj-${Date.now()}`,
         productId: selectedProductForAdjust.id,
@@ -239,13 +266,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         reason: adjustmentReason,
         previousStock: selectedProductForAdjust.currentStock,
         newStock: newStockAfterAdjustment,
-        notes: adjustmentNotes,
+        notes: adjustmentNotes.trim(),
         user: currentUser.name,
         timestamp: new Date().toISOString(),
       });
+      notify('Inventory adjusted successfully.', 'success');
       setSelectedProductForAdjust(null);
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to save stock adjustment.');
+      setAdjustmentFormError(error instanceof Error ? error.message : 'Unable to save stock adjustment.');
+    } finally {
+      setIsSubmittingAdjustment(false);
     }
   };
 
@@ -448,6 +478,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveStockIn} className="space-y-4 pt-4 text-xs">
+              {stockInFormError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {stockInFormError}
+                </div>
+              )}
+
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="font-bold text-slate-900">{selectedProductForAdd.name}</p>
                 <p className="mt-0.5 font-mono text-slate-500">Current Stock: {selectedProductForAdd.currentStock} {selectedProductForAdd.unit}</p>
@@ -461,9 +497,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     min="1"
                     required
                     value={quantityReceived}
-                    onChange={(e) => setQuantityReceived(parseInt(e.target.value, 10) || 0)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-mono font-bold text-slate-900"
+                    onChange={(e) => {
+                      setQuantityReceived(parseInt(e.target.value, 10) || 0);
+                      setStockInErrors((current) => ({ ...current, quantityReceived: '' }));
+                    }}
+                    className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
+                      stockInErrors.quantityReceived ? 'border-rose-300' : 'border-slate-200'
+                    }`}
                   />
+                  {stockInErrors.quantityReceived && (
+                    <p className="text-[11px] text-rose-600">{stockInErrors.quantityReceived}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Total Purchase Cost ({settings.currencySymbol}) *</label>
@@ -473,34 +517,25 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     step="0.01"
                     required
                     value={totalPurchaseCost || ''}
-                    onChange={(e) => setTotalPurchaseCost(parseFloat(e.target.value) || 0)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-mono font-bold text-slate-900"
+                    onChange={(e) => {
+                      setTotalPurchaseCost(parseFloat(e.target.value) || 0);
+                      setStockInErrors((current) => ({ ...current, totalPurchaseCost: '' }));
+                    }}
+                    className={`w-full rounded-xl border bg-slate-50 p-2.5 font-mono font-bold text-slate-900 ${
+                      stockInErrors.totalPurchaseCost ? 'border-rose-300' : 'border-slate-200'
+                    }`}
                   />
+                  {stockInErrors.totalPurchaseCost && (
+                    <p className="text-[11px] text-rose-600">{stockInErrors.totalPurchaseCost}</p>
+                  )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Unit Cost (Auto)</label>
-                  <div className="w-full rounded-xl border border-slate-200 bg-slate-100 p-2.5 font-mono font-bold text-slate-700">
-                    {settings.currencySymbol}
-                    {calculatedUnitCost.toFixed(2)}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Supplier (Optional)</label>
-                  <select
-                    value={supplierId}
-                    onChange={(e) => setSupplierId(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-bold text-slate-900"
-                  >
-                    <option value="">No supplier selected</option>
-                    {suppliers.map((supplier) => (
-                      <option key={supplier.id} value={supplier.id}>
-                        {supplier.name}
-                      </option>
-                    ))}
-                  </select>
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">Unit Cost (Auto)</label>
+                <div className="w-full rounded-xl border border-slate-200 bg-slate-100 p-2.5 font-mono font-bold text-slate-700">
+                  {settings.currencySymbol}
+                  {calculatedUnitCost.toFixed(2)}
                 </div>
               </div>
 
@@ -508,10 +543,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <label className="font-bold text-slate-700">Notes</label>
                 <textarea
                   value={receivingNotes}
-                  onChange={(e) => setReceivingNotes(e.target.value)}
+                  onChange={(e) => {
+                    setReceivingNotes(e.target.value);
+                    setStockInErrors((current) => ({ ...current, notes: '' }));
+                  }}
+                  maxLength={300}
                   placeholder="Optional receiving notes"
-                  className="h-20 w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-slate-900"
+                  className={`h-20 w-full rounded-xl border bg-slate-50 p-2.5 text-slate-900 ${
+                    stockInErrors.notes ? 'border-rose-300' : 'border-slate-200'
+                  }`}
                 />
+                <div className="flex items-center justify-between">
+                  {stockInErrors.notes ? (
+                    <p className="text-[11px] text-rose-600">{stockInErrors.notes}</p>
+                  ) : (
+                    <span />
+                  )}
+                  <p className="text-[11px] text-slate-400">{receivingNotes.length}/300</p>
+                </div>
               </div>
 
               <div className="flex gap-3 border-t border-slate-100 pt-3">
@@ -524,9 +573,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </button>
                 <button
                   type="submit"
+                  disabled={isSubmittingStockIn}
                   className="w-1/2 rounded-xl bg-blue-600 py-2.5 font-bold text-white shadow-md hover:bg-blue-500"
                 >
-                  Save Stock Entry
+                  {isSubmittingStockIn ? 'Saving...' : 'Save Stock Entry'}
                 </button>
               </div>
             </form>
@@ -555,6 +605,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveAdjustment} className="space-y-4 pt-4 text-xs">
+              {adjustmentFormError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {adjustmentFormError}
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">Adjustment Type</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -591,16 +647,29 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     min="1"
                     required
                     value={adjustmentQuantity}
-                    onChange={(e) => setAdjustmentQuantity(parseInt(e.target.value, 10) || 0)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-bold text-slate-900"
+                    onChange={(e) => {
+                      setAdjustmentQuantity(parseInt(e.target.value, 10) || 0);
+                      setAdjustmentErrors((current) => ({ ...current, quantity: '' }));
+                    }}
+                    className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
+                      adjustmentErrors.quantity ? 'border-rose-300' : 'border-slate-200'
+                    }`}
                   />
+                  {adjustmentErrors.quantity && (
+                    <p className="text-[11px] text-rose-600">{adjustmentErrors.quantity}</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Reason *</label>
                   <select
                     value={adjustmentReason}
-                    onChange={(e) => setAdjustmentReason(e.target.value as StockAdjustment['reason'])}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-bold text-slate-700"
+                    onChange={(e) => {
+                      setAdjustmentReason(e.target.value as StockAdjustment['reason']);
+                      setAdjustmentErrors((current) => ({ ...current, reason: '' }));
+                    }}
+                    className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-700 ${
+                      adjustmentErrors.reason ? 'border-rose-300' : 'border-slate-200'
+                    }`}
                   >
                     <option value="damaged">Damaged</option>
                     <option value="lost">Lost</option>
@@ -610,6 +679,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <option value="encoding_error">Encoding Error</option>
                     <option value="other">Other</option>
                   </select>
+                  {adjustmentErrors.reason && (
+                    <p className="text-[11px] text-rose-600">{adjustmentErrors.reason}</p>
+                  )}
                 </div>
               </div>
 
@@ -617,10 +689,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <label className="font-bold text-slate-700">Notes</label>
                 <textarea
                   value={adjustmentNotes}
-                  onChange={(e) => setAdjustmentNotes(e.target.value)}
+                  onChange={(e) => {
+                    setAdjustmentNotes(e.target.value);
+                    setAdjustmentErrors((current) => ({ ...current, notes: '' }));
+                  }}
+                  maxLength={300}
                   placeholder="Optional adjustment notes"
-                  className="h-20 w-full rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-slate-900"
+                  className={`h-20 w-full rounded-xl border bg-slate-50 p-2.5 text-slate-900 ${
+                    adjustmentErrors.notes ? 'border-rose-300' : 'border-slate-200'
+                  }`}
                 />
+                <div className="flex items-center justify-between">
+                  {adjustmentErrors.notes ? (
+                    <p className="text-[11px] text-rose-600">{adjustmentErrors.notes}</p>
+                  ) : (
+                    <span />
+                  )}
+                  <p className="text-[11px] text-slate-400">{adjustmentNotes.length}/300</p>
+                </div>
               </div>
 
               <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
@@ -644,9 +730,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </button>
                 <button
                   type="submit"
+                  disabled={isSubmittingAdjustment}
                   className="w-1/2 rounded-xl bg-blue-600 py-2.5 font-bold text-white shadow-md hover:bg-blue-500"
                 >
-                  Save Adjustment
+                  {isSubmittingAdjustment ? 'Saving...' : 'Save Adjustment'}
                 </button>
               </div>
             </form>

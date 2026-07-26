@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Expense, StoreSettings, User } from '../types';
+import { useFeedback } from './FeedbackProvider';
 import { PaginationControls } from './PaginationControls';
 import { DollarSign, Edit2, Plus, Trash2, X } from 'lucide-react';
 
@@ -20,6 +21,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   onEditExpense,
   onDeleteExpense,
 }) => {
+  const { confirm, notify } = useFeedback();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -28,6 +30,8 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   const [amount, setAmount] = useState<number>(0);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [busyExpenseId, setBusyExpenseId] = useState<string | null>(null);
 
   const totalExpense = expenses.reduce((sum, expense) => sum + expense.amount, 0);
   const sortedExpenses = useMemo(
@@ -70,16 +74,28 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) {
+      return;
+    }
 
     const nextErrors: Record<string, string> = {};
-    if (!category.trim()) {
+    const normalizedCategory = category.trim().replace(/\s+/g, ' ');
+    const normalizedType = typeOfExpense.trim().replace(/\s+/g, ' ');
+
+    if (!normalizedCategory) {
       nextErrors.category = 'Expense category is required.';
+    } else if (normalizedCategory.length > 120) {
+      nextErrors.category = 'Expense category must be 120 characters or fewer.';
     }
-    if (!typeOfExpense.trim()) {
+    if (!normalizedType) {
       nextErrors.typeOfExpense = 'Type of expense is required.';
+    } else if (normalizedType.length > 160) {
+      nextErrors.typeOfExpense = 'Type of expense must be 160 characters or fewer.';
     }
     if (amount <= 0) {
       nextErrors.amount = 'Amount must be greater than zero.';
+    } else if (amount > 100000000) {
+      nextErrors.amount = 'Amount is too large.';
     }
 
     setFieldErrors(nextErrors);
@@ -90,8 +106,8 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
 
     const expensePayload: Expense = {
       id: editingExpense ? editingExpense.id : `exp-${Date.now()}`,
-      category: category.trim(),
-      description: typeOfExpense.trim(),
+      category: normalizedCategory,
+      description: normalizedType,
       amount,
       date: editingExpense ? editingExpense.date : new Date().toISOString().split('T')[0],
       referenceNumber: editingExpense?.referenceNumber,
@@ -99,14 +115,19 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     };
 
     try {
+      setIsSubmitting(true);
       if (editingExpense) {
         await onEditExpense(expensePayload);
+        notify('Expense updated successfully.', 'success');
       } else {
         await onAddExpense(expensePayload);
+        notify('Expense added successfully.', 'success');
       }
       closeModal();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Unable to save expense.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -187,17 +208,29 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                       </button>
                       <button
                         onClick={async () => {
-                          if (!confirm(`Delete this expense entry for "${expense.description}"?`)) {
+                          const approved = await confirm({
+                            title: 'Delete expense entry?',
+                            message: `This will permanently delete "${expense.description}". This action cannot be undone.`,
+                            confirmLabel: 'Delete',
+                            tone: 'danger',
+                          });
+                          if (!approved) {
                             return;
                           }
                           try {
+                            setBusyExpenseId(expense.id);
                             await onDeleteExpense(expense.id);
+                            notify('Expense deleted successfully.', 'success');
                           } catch (error) {
-                            alert(
+                            notify(
                               error instanceof Error ? error.message : 'Unable to delete expense.',
+                              'error',
                             );
+                          } finally {
+                            setBusyExpenseId(null);
                           }
                         }}
+                        disabled={busyExpenseId === expense.id}
                         className="rounded-lg p-1.5 text-rose-500 transition-colors hover:bg-rose-50"
                         title="Delete Expense"
                       >
@@ -247,6 +280,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                     setFieldErrors((current) => ({ ...current, category: '' }));
                   }}
                   placeholder="e.g. Utilities"
+                  maxLength={120}
                   className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
                     fieldErrors.category ? 'border-rose-300' : 'border-slate-200'
                   }`}
@@ -267,6 +301,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                     setFieldErrors((current) => ({ ...current, typeOfExpense: '' }));
                   }}
                   placeholder="e.g. Monthly Electricity Bill"
+                  maxLength={160}
                   className={`w-full rounded-xl border bg-slate-50 p-2.5 font-bold text-slate-900 ${
                     fieldErrors.typeOfExpense ? 'border-rose-300' : 'border-slate-200'
                   }`}
@@ -307,9 +342,14 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                 </button>
                 <button
                   type="submit"
+                  disabled={isSubmitting}
                   className="w-1/2 rounded-xl bg-blue-600 py-2.5 font-bold text-white shadow-md hover:bg-blue-500"
                 >
-                  {editingExpense ? 'Save Expense' : 'Add Expense'}
+                  {isSubmitting
+                    ? 'Saving...'
+                    : editingExpense
+                      ? 'Save Expense'
+                      : 'Add Expense'}
                 </button>
               </div>
             </form>

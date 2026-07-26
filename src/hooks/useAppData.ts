@@ -10,7 +10,6 @@ import {
   mapReceivingRecord,
   mapSettings,
   mapStockAdjustment,
-  mapSupplier,
   mapTransaction,
   mapUser,
 } from '../lib/mappers';
@@ -45,7 +44,6 @@ const emptySnapshot: AppSnapshot = {
   },
   users: [],
   categories: [],
-  suppliers: [],
   products: [],
   transactions: [],
   expenses: [],
@@ -115,7 +113,6 @@ export const useAppData = (
         .from('categories')
         .select('id, name, description, active, products(count)')
         .order('name');
-      const suppliersQuery = supabase.from('suppliers').select('*').order('name');
       const productsQuery = supabase.from('products').select('*').order('name');
       const transactionsQuery = supabase
         .from('transactions')
@@ -155,7 +152,6 @@ export const useAppData = (
               .select(
                 `
                   *,
-                  supplier:suppliers!stock_receiving_records_supplier_id_fkey(name),
                   recorder:profiles!stock_receiving_records_recorded_by_fkey(name),
                   stock_receiving_items(
                     *,
@@ -182,7 +178,6 @@ export const useAppData = (
       const [
         settingsResult,
         categoriesResult,
-        suppliersResult,
         productsResult,
         transactionsResult,
         inventoryMovementsResult,
@@ -194,7 +189,6 @@ export const useAppData = (
       ] = await Promise.all([
         settingsQuery,
         categoriesQuery,
-        suppliersQuery,
         productsQuery,
         transactionsQuery,
         inventoryMovementsQuery,
@@ -208,7 +202,6 @@ export const useAppData = (
       const queryErrors = [
         settingsResult.error,
         categoriesResult.error,
-        suppliersResult.error,
         productsResult.error,
         transactionsResult.error,
         inventoryMovementsResult.error,
@@ -226,7 +219,6 @@ export const useAppData = (
         settings: mapSettings(settingsResult.data),
         users: usersResult,
         categories: (categoriesResult.data ?? []).map(mapCategory),
-        suppliers: (suppliersResult.data ?? []).map(mapSupplier),
         products: (productsResult.data ?? []).map(mapProduct),
         transactions: (transactionsResult.data ?? []).map(mapTransaction),
         inventoryMovements: (inventoryMovementsResult.data ?? []).map(mapInventoryMovement),
@@ -446,7 +438,6 @@ export const useAppData = (
             productId: primaryItem.productId,
             quantityReceived: primaryItem.quantityReceived,
             totalPurchaseCost: record.totalAmount,
-            supplierId: record.supplierId,
             referenceNumber: record.referenceNumber,
             deliveryDate: record.deliveryDate,
             notes: record.notes ?? '',

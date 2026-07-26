@@ -28,16 +28,6 @@ export interface Category {
   active?: boolean;
 }
 
-export interface Supplier {
-  id: string;
-  name: string;
-  contactPerson: string;
-  phone: string;
-  email: string;
-  address: string;
-  active: boolean;
-}
-
 export interface Product {
   id: string;
   sku: string;
@@ -45,7 +35,6 @@ export interface Product {
   name: string;
   description?: string;
   categoryId: string;
-  supplierId?: string;
   unit: string; // 'pc', 'pack', 'bottle', 'kg', etc.
   costPrice: number;
   sellingPrice: number;
@@ -107,8 +96,6 @@ export interface StockReceivingItem {
 export interface StockReceivingRecord {
   id: string;
   referenceNumber: string;
-  supplierId?: string;
-  supplierName?: string;
   deliveryDate: string;
   items: StockReceivingItem[];
   totalAmount: number;
@@ -197,7 +184,6 @@ export interface AppSnapshot {
   settings: StoreSettings;
   users: User[];
   categories: Category[];
-  suppliers: Supplier[];
   products: Product[];
   transactions: Transaction[];
   expenses: Expense[];
@@ -214,7 +200,6 @@ export interface ProductInput {
   name: string;
   description?: string;
   categoryId: string;
-  supplierId?: string;
   unit: string;
   costPrice: number;
   totalPurchaseCost?: number;
